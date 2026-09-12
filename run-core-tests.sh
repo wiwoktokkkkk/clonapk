@@ -8,7 +8,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LIB="$ROOT/tools/lib"
 BCVER="1.81"
-CP="$LIB/bcprov-jdk18on-$BCVER.jar:$LIB/bcpkix-jdk18on-$BCVER.jar:$LIB/bcutil-jdk18on-$BCVER.jar"
+APKSIG="apksig-8.11.1"
+if [ ! -f "$LIB/$APKSIG.jar" ]; then
+  echo "Mengunduh $APKSIG.jar ..."
+  curl -fsSL -o "$LIB/$APKSIG.jar" \
+    "https://dl.google.com/android/maven2/com/android/tools/build/apksig/8.11.1/$APKSIG.jar"
+fi
+CP="$LIB/bcprov-jdk18on-$BCVER.jar:$LIB/bcpkix-jdk18on-$BCVER.jar:$LIB/bcutil-jdk18on-$BCVER.jar:$LIB/$APKSIG.jar"
 
 mkdir -p "$LIB"
 for a in bcprov bcpkix bcutil; do

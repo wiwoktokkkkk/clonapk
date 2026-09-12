@@ -36,6 +36,7 @@ public final class CloneTest {
 
         testDeepScanToggle(key, workDir);
         testEdgeCases(key, workDir);
+        testSetMinSdkUtil();
         testValidation();
         testBase64();
 
@@ -110,16 +111,13 @@ public final class CloneTest {
         check("versionName tetap terbaca",
                 "1.7.3".equals(ManifestEditor.readVersionName(outManifest)));
 
+        // Hasil kini ditandatangani v1+v2, jadi minSdk asli dipertahankan apa adanya.
         Integer outMinSdk = ManifestEditor.readMinSdk(outManifest);
-        if (minSdk > 23) {
-            check("minSdk diturunkan ke 23 (dari " + minSdk + ")",
-                    outMinSdk != null && outMinSdk == 23);
-            check("flag minSdkLowered = true", res.minSdkLowered);
-        } else {
-            check("minSdk tidak diubah (" + minSdk + ")",
-                    outMinSdk != null && outMinSdk == minSdk);
-            check("flag minSdkLowered = false", !res.minSdkLowered);
-        }
+        check("minSdk dipertahankan (" + minSdk + ")",
+                outMinSdk != null && outMinSdk == minSdk);
+        check("flag minSdkLowered = false", !res.minSdkLowered);
+        check("hasil lolos verifikasi apksig (v1+v2)",
+                ApkSigner.verifyApk(outFile));
 
         // Isi APK selain manifest harus tetap ada dan utuh.
         try (ZipFile zf = new ZipFile(outFile)) {
@@ -130,8 +128,8 @@ public final class CloneTest {
             check("META-INF isi non-tandatangan dipertahankan",
                     zf.getEntry("META-INF/services/x") != null);
             check("MANIFEST.MF ada", zf.getEntry("META-INF/MANIFEST.MF") != null);
-            check("CERT.SF ada", zf.getEntry("META-INF/CERT.SF") != null);
-            check("CERT.RSA ada", zf.getEntry("META-INF/CERT.RSA") != null);
+            check("berkas .SF penandatangan ada", hasEntryEnding(zf, ".SF"));
+            check("berkas .RSA penandatangan ada", hasEntryEnding(zf, ".RSA"));
 
             byte[] dexOrig = entryOf(src, "classes.dex");
             byte[] dexNew = entryOf(outFile, "classes.dex");
@@ -222,6 +220,20 @@ public final class CloneTest {
                 "com.foo.bar.c2".equals(ApkUtil.suggestPackageName("com.foo.bar", "2")));
         check("safeFileName membersihkan spasi",
                 "Aplikasi_Saya.apk".equals(ApkUtil.safeFileName("Aplikasi Saya", "pkg")));
+    }
+
+    private static void testSetMinSdkUtil() {
+        System.out.println("\n--- Uji util setMinSdk (dipertahankan untuk kebutuhan khusus) ---");
+        byte[] m = TestApkFactory.buildManifest("com.minsdk.app", 30, true);
+        byte[] lowered = ManifestEditor.setMinSdk(m, 23);
+        check("setMinSdk mengubah 30 -> 23",
+                ManifestEditor.readMinSdk(lowered) != null
+                        && ManifestEditor.readMinSdk(lowered) == 23);
+        // setMinSdk adalah setter apa adanya; penjagaan "hanya menurunkan"
+        // menjadi tanggung jawab pemanggil.
+        check("setMinSdk menyetel nilai persis (30 -> 34)",
+                ManifestEditor.readMinSdk(ManifestEditor.setMinSdk(m, 34)) != null
+                        && ManifestEditor.readMinSdk(ManifestEditor.setMinSdk(m, 34)) == 34);
     }
 
     private static void testValidation() {
@@ -371,6 +383,17 @@ public final class CloneTest {
             }
         }
         return null;
+    }
+
+    private static boolean hasEntryEnding(java.util.zip.ZipFile zf, String suffix) {
+        java.util.Enumeration<? extends java.util.zip.ZipEntry> en = zf.entries();
+        while (en.hasMoreElements()) {
+            String n = en.nextElement().getName().toUpperCase();
+            if (n.startsWith("META-INF/") && n.endsWith(suffix.toUpperCase())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static byte[] read(File f) throws Exception {

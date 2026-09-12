@@ -19,39 +19,20 @@ class ClonApkApp extends StatelessWidget {
     return CupertinoApp(
       title: 'ClonApk',
       debugShowCheckedModeBanner: false,
+      // brightness dibiarkan null: widget Cupertino mewarisi mode
+      // terang/gelap dari platform, dan warna dinamis menyesuaikan sendiri.
       theme: const CupertinoThemeData(
         primaryColor: Color(0xFF0A84FF),
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: Color(0xFFF2F2F7),
+        scaffoldBackgroundColor: CupertinoColors.systemGroupedBackground,
         textTheme: CupertinoTextThemeData(
           navLargeTitleTextStyle: TextStyle(
-            fontFamily: '.SF Pro Display',
             fontSize: 34,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.37,
-            color: CupertinoColors.black,
+            color: CupertinoColors.label,
           ),
         ),
       ),
-      darkTheme: const CupertinoThemeData(
-        primaryColor: Color(0xFF0A84FF),
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: Color(0xFF000000),
-        textTheme: CupertinoTextThemeData(
-          navLargeTitleTextStyle: TextStyle(
-            fontFamily: '.SF Pro Display',
-            fontSize: 34,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.37,
-            color: CupertinoColors.white,
-          ),
-        ),
-      ),
-      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
-        DefaultMaterialLocalizations.delegate,
-        DefaultWidgetsLocalizations.delegate,
-        DefaultCupertinoLocalizations.delegate,
-      ],
       home: const HomeScreen(),
     );
   }

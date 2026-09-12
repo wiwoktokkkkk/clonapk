@@ -226,7 +226,7 @@ class _CloneSheetState extends State<_CloneSheet> {
                       autocorrect: false,
                       enableSuggestions: false,
                       textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _start(),
+                      onFieldSubmitted: (_) => _start(),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     IosRow(

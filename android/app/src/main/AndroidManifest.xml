@@ -9,12 +9,7 @@
         </intent>
     </queries>
 
-    <!-- Memilih berkas APK dari penyimpanan (dipakai pemilih berkas). -->
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-
-    <!-- Mengirim berkas APK hasil clone ke aplikasi lain / pemasang. -->
+    <!-- Memasang berkas APK hasil clone lewat pemasang sistem. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
@@ -22,7 +17,6 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:requestLegacyExternalStorage="true"
         android:enableOnBackInvokedCallback="true">
 
         <activity

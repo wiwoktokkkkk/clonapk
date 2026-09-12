@@ -14,8 +14,6 @@ dependencies:
   cupertino_icons: ^1.0.9
   # Pemilih berkas untuk mengambil APK dari penyimpanan.
   file_picker: ^12.3.0
-  # Izin baca penyimpanan pada Android <= 12.
-  permission_handler: ^13.0.2
   # Membagikan APK hasil clone.
   share_plus: ^13.3.0
 

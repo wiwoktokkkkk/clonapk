@@ -162,7 +162,7 @@ class _ResultScreenState extends State<ResultScreen> {
                     IosRow(
                       title: 'Pasang sekarang',
                       subtitle: 'Buka pemasang Android',
-                      leading: const _Icon(CupertinoIcons.down_arrow_circle,
+                      leading: const _Icon(CupertinoIcons.arrow_down_circle,
                           color: CupertinoColors.activeGreen),
                       trailing: const Icon(CupertinoIcons.chevron_right,
                           size: 15, color: CupertinoColors.systemGrey3),

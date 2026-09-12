@@ -1,6 +1,13 @@
+analyzer:
+  exclude:
+    - build/**
+    - android/**
 include: package:flutter_lints/flutter.yaml
 
 linter:
   rules:
     prefer_single_quotes: true
     require_trailing_commas: false
+    # Urutan argumen `children:` murni kosmetik; dipadamkan supaya
+    # panggilan widget multi-seksi tetap terbaca alami.
+    sort_child_properties_last: false

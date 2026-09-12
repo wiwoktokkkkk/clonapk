@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/app_info.dart';
@@ -141,25 +140,19 @@ class CloneService {
     }
   }
 
-  /// Minta izin baca penyimpanan bila diperlukan, lalu buka pemilih berkas.
+  /// Buka pemilih berkas untuk mengambil APK dari penyimpanan.
+  ///
+  /// Pemilih memakai Storage Access Framework, jadi tidak butuh izin
+  /// penyimpanan khusus sejak Android 11.
   ///
   /// @return path APK terpilih, atau null kalau pengguna membatalkan.
   Future<String?> pickApkFile() async {
-    if (Platform.isAndroid) {
-      final status = await Permission.storage.request();
-      // Pada Android 13+ izin storage selalu ditolak tetapi pemilih berkas tetap
-      // berfungsi lewat Storage Access Framework, jadi jangan memblokir di sini.
-      if (status.isPermanentlyDenied) {
-        await openAppSettings();
-        return null;
-      }
-    }
-    final res = await FilePicker.platform.pickFiles(
+    // API file_picker 12.x: metode statis yang mengembalikan List<PlatformFile>.
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['apk', 'apks', 'xapk'],
-      withData: false,
     );
-    final path = res?.files.single.path;
+    final path = files.isEmpty ? null : files.single.path;
     if (path == null || path.isEmpty) return null;
     return path;
   }

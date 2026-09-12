@@ -15,6 +15,7 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,6 +163,70 @@ public final class ApkSigner {
     }
 
     /**
+     * Hitung digest satu entri ZIP secara streaming (tanpa menyangga isi entri).
+     *
+     * <p>APK nyata bisa ratusan megabyte; menahan satu entri utuh di heap akan
+     * membuat perangkat kecil kehabisan memori.
+     */
+    private static String digestEntry(ZipFile zf, ZipEntry e, MessageDigest md)
+            throws IOException {
+        md.reset();
+        if (!e.isDirectory()) {
+            try (InputStream in = zf.getInputStream(e)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    md.update(buf, 0, n);
+                }
+            }
+        }
+        return encodeBase64(md.digest());
+    }
+
+    /**
+     * Tandatangani APK dengan skema v1+v2 memakai apksig (pustaka yang sama
+     * dengan yang dipakai AGP/apksigner).
+     *
+     * <p>Kenapa tidak v1 saja: sejak Android 11, APK dengan targetSdk >= 30 wajib
+     * punya tanda tangan skema v2; v1-only akan ditolak saat pemasangan. apksig
+     * menghitung blok tanda tangan secara streaming sehingga tetap hemat memori.
+     */
+    public static void signApk(File unsignedZip, File dest, SigningKey key)
+            throws IOException {
+        try {
+            com.android.apksig.ApkSigner.SignerConfig cfg =
+                    new com.android.apksig.ApkSigner.SignerConfig.Builder(
+                            "CLONAPK", key.privateKey,
+                            java.util.Collections.singletonList(key.certificate))
+                            .build();
+            com.android.apksig.ApkSigner signer =
+                    new com.android.apksig.ApkSigner.Builder(
+                            java.util.Collections.singletonList(cfg))
+                            .setInputApk(unsignedZip)
+                            .setOutputApk(dest)
+                            .setV1SigningEnabled(true)
+                            .setV2SigningEnabled(true)
+                            .build();
+            signer.sign();
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SignException("penandatanganan gagal: " + e.getMessage(), e);
+        }
+    }
+
+    /** Verifikasi penuh (v1+v2) dengan verifier resmi apksig. */
+    public static boolean verifyApk(File apk) {
+        try {
+            com.android.apksig.ApkVerifier verifier =
+                    new com.android.apksig.ApkVerifier.Builder(apk).build();
+            return verifier.verify().isVerified();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Tandatangani ulang sebuah APK yang entri-entrinya sudah siap.
      *
      * @param entries pasangan (nama entri -> isi) dalam urutan penulisan yang diinginkan.
@@ -291,13 +356,22 @@ public final class ApkSigner {
      */
     public static boolean verifyV1(byte[] apk) throws IOException {
         TmpFile tmp = new TmpFile(apk);
+        try {
+            return verifyV1(tmp.file());
+        } finally {
+            tmp.close();
+        }
+    }
+
+    /** Verifikasi streaming langsung dari berkas, memori konstan. */
+    public static boolean verifyV1(File apk) throws IOException {
         final MessageDigest md;
         try {
             md = MessageDigest.getInstance(DIGEST_ALG);
         } catch (NoSuchAlgorithmException e) {
             throw new SignException(DIGEST_ALG + " tidak tersedia di runtime ini", e);
         }
-        try (ZipFile zf = new ZipFile(tmp.file())) {
+        try (ZipFile zf = new ZipFile(apk)) {
             ZipEntry mfEntry = zf.getEntry("META-INF/MANIFEST.MF");
             if (mfEntry == null) {
                 return false;
@@ -313,21 +387,37 @@ public final class ApkSigner {
                     if (e == null) {
                         return false;
                     }
-                    md.reset();
-                    if (!e.isDirectory()) {
-                        md.update(read(zf, e));
-                    }
-                    if (!encodeBase64(md.digest()).equals(expected)) {
+                    if (!digestEntry(zf, e, md).equals(expected)) {
                         return false;
                     }
                     currentName = null;
                 }
             }
-            return zf.getEntry("META-INF/CERT.SF") != null
-                    && zf.getEntry("META-INF/CERT.RSA") != null;
-        } finally {
-            tmp.close();
+            return hasSignaturePair(zf);
         }
+    }
+
+    /**
+     * Pasangan berkas tanda tangan v1. Nama berkas mengikuti nama signer
+     * (jarsigner memakai CERT, apksig memakai nama yang kita berikan),
+     * jadi yang diperiksa adalah ekstensinya, bukan namanya.
+     */
+    private static boolean hasSignaturePair(ZipFile zf) {
+        boolean sf = false;
+        boolean key = false;
+        Enumeration<? extends ZipEntry> en = zf.entries();
+        while (en.hasMoreElements()) {
+            String n = en.nextElement().getName().toUpperCase();
+            if (!n.startsWith("META-INF/")) {
+                continue;
+            }
+            if (n.endsWith(".SF")) {
+                sf = true;
+            } else if (n.endsWith(".RSA") || n.endsWith(".DSA") || n.endsWith(".EC")) {
+                key = true;
+            }
+        }
+        return sf && key;
     }
 
     static byte[] read(ZipFile zf, ZipEntry e) throws IOException {

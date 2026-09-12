@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 
 /**
  * Mesin clone: membaca APK sumber, mengganti identitas package, lalu menandatangani ulang.
@@ -27,9 +28,6 @@ import java.util.zip.ZipFile;
  * </ol>
  */
 public final class Repackager {
-
-    /** Batas minSdk yang aman untuk APK bertanda tangan v1 saja. */
-    private static final int MAX_V1_ONLY_MIN_SDK = 23;
 
     private Repackager() {
     }
@@ -123,10 +121,11 @@ public final class Repackager {
             throw new CloneException("Gagal membuat direktori keluaran: " + outputDir);
         }
 
-        LinkedHashMap<String, byte[]> entries = new LinkedHashMap<>();
+        // Tahap 1: baca + tambal manifest. Hanya manifest yang disangga utuh
+        // (ukurannya kecil); isi APK lain tidak pernah dimuat penuh ke memori.
         String originalPackage;
-        boolean minSdkLowered = false;
-
+        byte[] newManifest;
+        int totalEntries;
         try (ZipFile zf = new ZipFile(source)) {
             ZipEntry manifestEntry = zf.getEntry("AndroidManifest.xml");
             if (manifestEntry == null) {
@@ -141,78 +140,103 @@ public final class Repackager {
             }
 
             report(progress, "Menambal AndroidManifest.xml", 18);
-            byte[] newManifest =
-                    ManifestEditor.changePackage(manifestBytes, originalPackage, newPackage,
-                            deepScanValues);
+            newManifest = ManifestEditor.changePackage(
+                    manifestBytes, originalPackage, newPackage, deepScanValues);
 
-            report(progress, "Menyesuaikan minSdkVersion", 24);
-            Integer currentMinSdk = ManifestEditor.readMinSdk(newManifest);
-            if (currentMinSdk != null && currentMinSdk > MAX_V1_ONLY_MIN_SDK) {
-                newManifest = ManifestEditor.setMinSdk(newManifest, MAX_V1_ONLY_MIN_SDK);
-                minSdkLowered = true;
+            totalEntries = countEntries(zf);
+        }
+
+        // Tahap 2: salin isi ke zip sementara (tanpa tanda tangan lama), lalu
+        // tandatangani berkas-ke-berkas. Memori tetap konstan berapa pun ukuran APK.
+        File tmpUnsigned = File.createTempFile("clonapk-unsigned", ".apk");
+        try {
+            try (ZipFile zf = new ZipFile(source);
+                 ZipOutputStream zos =
+                         new ZipOutputStream(new FileOutputStream(tmpUnsigned))) {
+                int i = 0;
+                Enumeration<? extends ZipEntry> en = zf.entries();
+                while (en.hasMoreElements()) {
+                    ZipEntry ze = en.nextElement();
+                    String name = ze.getName();
+                    i++;
+                    if (isOldSignature(name)) {
+                        continue;
+                    }
+                    if (name.equals("AndroidManifest.xml")) {
+                        zos.putNextEntry(new ZipEntry(name));
+                        zos.write(newManifest);
+                        zos.closeEntry();
+                    } else if (ze.isDirectory()) {
+                        ZipEntry dir = new ZipEntry(name);
+                        dir.setMethod(ZipEntry.STORED);
+                        dir.setSize(0);
+                        dir.setCompressedSize(0);
+                        dir.setCrc(0);
+                        zos.putNextEntry(dir);
+                        zos.closeEntry();
+                    } else {
+                        zos.putNextEntry(new ZipEntry(name));
+                        copyEntry(zf, ze, zos);
+                        zos.closeEntry();
+                    }
+                    if (i % 8 == 0 || i == totalEntries) {
+                        report(progress, "Menyalin isi APK",
+                                25 + (int) (i * 45.0 / totalEntries));
+                    }
+                }
             }
 
-            Enumeration<? extends ZipEntry> en = zf.entries();
-            List<ZipEntry> list = new ArrayList<>();
-            while (en.hasMoreElements()) {
-                list.add(en.nextElement());
+            report(progress, "Menandatangani ulang (v1+v2)", 78);
+            File out = new File(outputDir, outputName);
+            ApkSigner.signApk(tmpUnsigned, out, signingKey);
+
+            report(progress, "Memverifikasi tanda tangan", 90);
+            if (!ApkSigner.verifyApk(out)) {
+                throw new CloneException(
+                        "Verifikasi tanda tangan gagal. APK tidak ditulis agar Anda tidak "
+                                + "memasang berkas rusak.");
             }
-            int total = Math.max(1, list.size());
-            int i = 0;
-            for (ZipEntry ze : list) {
-                String name = ze.getName();
-                i++;
-                if (isOldSignature(name)) {
-                    continue;
-                }
-                if (name.equals("AndroidManifest.xml")) {
-                    entries.put(name, newManifest);
-                } else if (ze.isDirectory()) {
-                    entries.put(name, null);
-                } else {
-                    byte[] data = readAll(zf, ze);
-                    entries.put(name, data);
-                }
-                if (i % 8 == 0 || i == total) {
-                    report(progress, "Menyalin isi APK",
-                            25 + (int) (i * 45.0 / total));
-                }
+            String writtenPkg = ManifestEditor.readPackage(extractManifest(out));
+            if (!newPackage.equals(writtenPkg)) {
+                throw new CloneException(
+                        "Package pada hasil tidak cocok: " + writtenPkg);
             }
+            report(progress, "Selesai", 100);
+            return new Result(out, newPackage, originalPackage, false);
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            tmpUnsigned.delete();
         }
-
-        report(progress, "Menandatangani ulang", 78);
-        byte[] signed = ApkSigner.sign(entries, signingKey);
-
-        report(progress, "Memverifikasi tanda tangan", 90);
-        if (!ApkSigner.verifyV1(signed)) {
-            throw new CloneException(
-                    "Verifikasi tanda tangan gagal. APK tidak ditulis agar Anda tidak "
-                            + "memasang berkas rusak.");
-        }
-        String writtenPkg = ManifestEditor.readPackage(extractManifest(signed));
-        if (!newPackage.equals(writtenPkg)) {
-            throw new CloneException(
-                    "Package pada hasil tidak cocok: " + writtenPkg);
-        }
-
-        File out = new File(outputDir, outputName);
-        try (FileOutputStream fos = new FileOutputStream(out)) {
-            fos.write(signed);
-        }
-        report(progress, "Selesai", 100);
-        return new Result(out, newPackage, originalPackage, minSdkLowered);
     }
 
-    private static byte[] extractManifest(byte[] apk) throws IOException {
-        ApkSigner.TmpFile tmp = new ApkSigner.TmpFile(apk);
-        try (ZipFile zf = new ZipFile(tmp.file())) {
+    private static byte[] extractManifest(File apk) throws IOException {
+        try (ZipFile zf = new ZipFile(apk)) {
             ZipEntry e = zf.getEntry("AndroidManifest.xml");
             if (e == null) {
                 throw new CloneException("AndroidManifest.xml hilang dari hasil clone");
             }
             return readAll(zf, e);
-        } finally {
-            tmp.close();
+        }
+    }
+
+    private static int countEntries(ZipFile zf) {
+        int n = 0;
+        Enumeration<? extends ZipEntry> en = zf.entries();
+        while (en.hasMoreElements()) {
+            en.nextElement();
+            n++;
+        }
+        return Math.max(1, n);
+    }
+
+    private static void copyEntry(ZipFile zf, ZipEntry ze, ZipOutputStream zos)
+            throws IOException {
+        try (InputStream in = zf.getInputStream(ze)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                zos.write(buf, 0, n);
+            }
         }
     }
 

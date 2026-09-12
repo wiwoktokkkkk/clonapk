@@ -188,7 +188,7 @@ class AppIconTile extends StatelessWidget {
         height: size,
         fit: BoxFit.cover,
         gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => _fallback(context),
+        errorBuilder: (context, error, stackTrace) => _fallback(context),
       );
     } else {
       child = _fallback(context);

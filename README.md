@@ -33,21 +33,21 @@ seperti aplikasi iOS di atas Android.
    `android:permission`, `android:process`, `android:name` yang merujuk package
    lama, plus entri string pool (kelas komponen fully-qualified). Opsi lanjutan
    bisa ikut mengganti nilai `meta-data` yang berawalan package lama.
-3. **Turunkan `minSdkVersion` ke 23** bila perlu, karena hasil ditandatangani
-   skema v1.
-4. **Buang tanda tangan lama** (`META-INF/*.SF/.RSA/.DSA/MANIFEST.MF`) lalu
-   **tandatangani ulang skema v1** (SHA-256) dengan sertifikat self-signed baru
-   (BouncyCastle). Hasil diverifikasi sebelum ditulis ke penyimpanan.
+3. **Buang tanda tangan lama** (`META-INF/*.SF/.RSA/.DSA/MANIFEST.MF`) lalu
+   **tandatangani ulang skema v1+v2** dengan `apksig` — pustaka yang sama dengan
+   AGP/apksigner — memakai sertifikat self-signed baru (BouncyCastle).
+   `minSdkVersion`/`targetSdkVersion` asli dipertahankan apa adanya.
+4. **Verifikasi penuh** (v1+v2) sebelum berkas ditulis ke penyimpanan; kalau
+   gagal, APK tidak ditulis.
 
 ### Batasan yang perlu diketahui
 
-- Skema v1 berarti perangkat Android 7+ tetap bisa memasang, tetapi APK yang
-  `minSdkVersion` aslinya > 23 akan diturunkan otomatis ke 23 (perilaku ini
-  dilaporkan di layar hasil).
 - Kode aplikasi (DEX) tidak diubah. Aplikasi yang memeriksa identitas dirinya
   sendiri secara eksplisit mungkin tetap mengenali dirinya; begitu juga layanan
   pihak ketiga yang mengikat identitas package (Firebase/Play Services) —
   karena itu opsi "ganti menyeluruh" dimatikan secara bawaan.
+- Proses sepenuhnya streaming (memori konstan), jadi APK besar sekalipun tidak
+  membuat aplikasi kehabisan memori.
 - Gunakan hanya untuk aplikasi yang Anda miliki haknya (uji pengembangan
   sendiri, dual-akun aplikasi Anda sendiri, dan sebagainya).
 
@@ -56,8 +56,10 @@ seperti aplikasi iOS di atas Android.
 Inti clone adalah pure Java dan diuji end-to-end di JVM: pembuat APK uji
 menulis manifest AXML sungguhan (varian UTF-8 & UTF-16), lalu proses clone
 dijalankan dan hasilnya diverifikasi — package terganti, referensi lama hilang,
-kelas pihak ketiga utuh, isi DEX identik bit-per-bit, dan tanda tangan v1
-terbaca oleh verifier JAR standar Java.
+kelas pihak ketiga utuh, isi DEX identik bit-per-bit, dan tanda tangan v1+v2
+lolos verifier `apksig`. Skrip `RealApkSmoke` (dipakai saat pengembangan) juga
+membuktikan APK nyata ratusan megabyte bisa di-clone dengan heap 256 MB dan
+lolos `apksigner verify` resmi dari Android SDK.
 
 ```bash
 ./run-core-tests.sh

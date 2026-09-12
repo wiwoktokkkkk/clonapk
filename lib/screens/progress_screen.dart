@@ -35,7 +35,6 @@ class _ProgressScreenState extends State<ProgressScreen>
 
   CloneProgress _progress = const CloneProgress('Menyiapkan', 0);
   String? _error;
-  bool _finished = false;
   StreamSubscription<CloneProgress>? _sub;
   late final Stopwatch _watch = Stopwatch()..start();
 
@@ -64,7 +63,6 @@ class _ProgressScreenState extends State<ProgressScreen>
         deepScan: widget.deepScan,
       );
       if (!mounted) return;
-      setState(() => _finished = true);
       await Navigator.of(context).pushReplacement(
         CupertinoPageRoute<void>(
           fullscreenDialog: true,
@@ -119,7 +117,7 @@ class _ProgressScreenState extends State<ProgressScreen>
                   ),
                   const SizedBox(height: 28),
                   Text(
-                    '${widget.newPackage}',
+                    widget.newPackage,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,

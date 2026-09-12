@@ -137,7 +137,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     subtitle:
                                         '${formatBytes(item.sizeBytes)} · ${_fmt(item.modified)}',
                                     leading: const Icon(
-                                      CupertinoIcons.doc_zipper,
+                                      CupertinoIcons.doc,
                                       size: 26,
                                       color: Color(0xFF0A84FF),
                                     ),

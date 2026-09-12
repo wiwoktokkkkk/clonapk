@@ -1,7 +1,7 @@
 plugins {
-    id "com.android.application"
-    id "kotlin-android"
-    id "dev.flutter.flutter-gradle-plugin"
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
@@ -29,26 +29,29 @@ android {
     buildTypes {
         release {
             // Kunci debug dipakai supaya `flutter build apk --release` langsung jalan
-            // tanpa perlu menyiapkan keystore rilis. Ganti dengan keystore sendiri
-            // sebelum distribusi sungguhan.
-            signingConfig = signingConfigs.debug
-            minifyEnabled = false
-            shrinkResources = false
+            // tanpa menyiapkan keystore rilis. Ganti dengan keystore sendiri sebelum
+            // distribusi sungguhan.
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 
-    packagingOptions {
-        // BouncyCastle menandatangani jar-nya; tanda tangan itu tidak boleh ikut
-        // dikemas ulang ke APK atau pemasangan akan gagal.
+    packaging {
+        // BouncyCastle menandatangani jar-nya; berkas tanda tangan itu tidak boleh
+        // ikut dikemas ulang ke APK atau pemasangan akan gagal.
         resources {
-            excludes += [
+            excludes += listOf(
                 "META-INF/*.SF",
                 "META-INF/*.DSA",
                 "META-INF/*.RSA",
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE*",
-                "META-INF/NOTICE*"
-            ]
+                "META-INF/NOTICE*",
+                // BouncyCastle & jspecify sama-sama membawa manifest OSGi;
+                // hanya satu yang boleh masuk APK.
+                "META-INF/**/OSGI-INF/**"
+            )
         }
     }
 }
@@ -59,8 +62,10 @@ flutter {
 
 dependencies {
     // Diperlukan mesin penandatanganan (sertifikat X.509 + blok PKCS#7 CERT.RSA).
-    // Android tidak menyediakan API setara di platform SDK.
-    implementation "org.bouncycastle:bcprov-jdk18on:1.81"
-    implementation "org.bouncycastle:bcpkix-jdk18on:1.81"
-    implementation "androidx.core:core-ktx:1.13.1"
+    // Platform Android tidak menyediakan API setara.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.81")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.81")
+    // Pustaka penandatanganan resmi (v1+v2) yang sama dengan AGP/apksigner.
+    implementation("com.android.tools.build:apksig:8.11.1")
+    implementation("androidx.core:core-ktx:1.13.1")
 }

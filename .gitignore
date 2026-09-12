@@ -26,3 +26,4 @@ tools/lib/*.jar
 .vscode/
 coverage/
 node_modules/
+tools/patch_apksig.py
