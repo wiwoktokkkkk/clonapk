@@ -12,21 +12,25 @@ Future<void> showCloneSheet(
   BuildContext context, {
   required String sourcePath,
   String? initialLabel,
+  List<String> splits = const [],
 }) {
   return showCupertinoModalPopup<void>(
     context: context,
     builder: (_) => _CloneSheet(
       sourcePath: sourcePath,
       initialLabel: initialLabel,
+      splits: splits,
     ),
   );
 }
 
 class _CloneSheet extends StatefulWidget {
-  const _CloneSheet({required this.sourcePath, this.initialLabel});
+  const _CloneSheet(
+      {required this.sourcePath, this.initialLabel, this.splits = const []});
 
   final String sourcePath;
   final String? initialLabel;
+  final List<String> splits;
 
   @override
   State<_CloneSheet> createState() => _CloneSheetState();
@@ -124,6 +128,7 @@ class _CloneSheetState extends State<_CloneSheet> {
           newPackage: pkg,
           newLabel: label.isEmpty ? null : label,
           deepScan: _deepScan,
+          splits: widget.splits,
         ),
       ),
     );

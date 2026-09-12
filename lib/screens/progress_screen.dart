@@ -17,12 +17,16 @@ class ProgressScreen extends StatefulWidget {
     required this.newPackage,
     this.newLabel,
     this.deepScan = false,
+    this.splits = const [],
   });
 
   final String sourcePath;
   final String newPackage;
   final String? newLabel;
   final bool deepScan;
+
+  /// Bagian split APK sumber yang wajib ikut di-clone.
+  final List<String> splits;
 
   @override
   State<ProgressScreen> createState() => _ProgressScreenState();
@@ -60,6 +64,7 @@ class _ProgressScreenState extends State<ProgressScreen>
         newPackage: widget.newPackage,
         newLabel: widget.newLabel,
         deepScan: widget.deepScan,
+        splits: widget.splits,
       );
       if (!mounted) return;
       Navigator.of(context).pop(result);

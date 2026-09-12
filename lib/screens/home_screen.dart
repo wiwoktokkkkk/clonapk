@@ -157,13 +157,14 @@ class _HomeScreenState extends State<HomeScreen> {
             sourcePath: app.apkPath,
             newPackage: pkg,
             newLabel: app.label,
+            splits: app.splitPaths,
           ),
         ),
       );
       if (result != null && mounted) {
         // Satu ketukan di installer sistem adalah satu-satunya langkah manual;
         // Android memang mewajibkan konfirmasi pemasangan.
-        await _service.installApk(result.path);
+        await _service.installApk(result.path, extraPaths: result.extraPaths);
         if (!mounted) return;
         await Navigator.of(context).push(
           CupertinoPageRoute<void>(
@@ -194,7 +195,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _manualClone(AppInfo app) async {
-    await showCloneSheet(context, sourcePath: app.apkPath, initialLabel: app.label);
+    await showCloneSheet(context,
+        sourcePath: app.apkPath,
+        initialLabel: app.label,
+        splits: app.splitPaths);
     _load();
   }
 
@@ -288,7 +292,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 label: 'Pasang',
                                 icon: CupertinoIcons.arrow_down_circle,
                                 onPressed: () async {
-                                  await _service.installApk(item.path);
+                                  await _service.installApk(item.path,
+                                      extraPaths: item.extraPaths);
                                   _load();
                                 },
                               ),

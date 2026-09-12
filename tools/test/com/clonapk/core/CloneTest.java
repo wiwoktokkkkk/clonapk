@@ -35,6 +35,7 @@ public final class CloneTest {
                 "string pool UTF-16 + minSdk 24");
 
         testDeepScanToggle(key, workDir);
+        testStoredPreservedAndAligned(key, workDir);
         testEdgeCases(key, workDir);
         testSetMinSdkUtil();
         testValidation();
@@ -175,6 +176,147 @@ public final class CloneTest {
         check("package tetap terganti saat deep-scan on",
                 "com.deep.app.clone2".equals(
                         ManifestEditor.readPackage(manifestOf(on.outputFile))));
+    }
+
+    /**
+     * APK modern menyimpan .so sebagai STORED (extractNativeLibs=false) dan
+     * mensyaratkan penjajaran halaman. Uji: metode kompresi dipertahankan,
+     * .so sejajar 16 KB, resources.arsc STORED sejajar 4 KB, isi identik,
+     * tanda tangan tetap valid.
+     */
+    private static void testStoredPreservedAndAligned(ApkSigner.SigningKey key, File workDir)
+            throws Exception {
+        // Siapkan sumber: APK minimal dengan .so STORED, arsc STORED, dex DEFLATED.
+        File base = new File(workDir, "stored-base.apk");
+        TestApkFactory.buildTestApk(base, "com.stored.app", 21, true);
+        byte[] manifest;
+        try (ZipFile zf = new ZipFile(base)) {
+            manifest = readAllBytes(zf.getInputStream(zf.getEntry("AndroidManifest.xml")));
+        }
+        java.util.Random rnd = new java.util.Random(42);
+        byte[] soBytes = new byte[50000];
+        rnd.nextBytes(soBytes);
+        byte[] arscBytes = new byte[70000];
+        rnd.nextBytes(arscBytes);
+        byte[] dexBytes = new byte[30000];
+        rnd.nextBytes(dexBytes);
+        File src = new File(workDir, "stored-src.apk");
+        try (java.util.zip.ZipOutputStream zos =
+                     new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(src))) {
+            ZipEntry mf = new ZipEntry("AndroidManifest.xml");
+            zos.putNextEntry(mf);
+            zos.write(manifest);
+            zos.closeEntry();
+            putStored(zos, "lib/x86_64/libnative.so", soBytes);
+            putStored(zos, "resources.arsc", arscBytes);
+            ZipEntry dex = new ZipEntry("classes.dex");
+            zos.putNextEntry(dex);
+            zos.write(dexBytes);
+            zos.closeEntry();
+        }
+
+        File outDir = new File(workDir, "stored-out");
+        //noinspection ResultOfMethodCallIgnored
+        outDir.mkdirs();
+        Repackager.Result r = Repackager.clone(
+                src, "com.stored.app.clone", outDir, "out.apk", key, false, null);
+
+        try (ZipFile zf = new ZipFile(r.outputFile)) {
+            check("STORED .so tetap STORED",
+                    zf.getEntry("lib/x86_64/libnative.so").getMethod() == ZipEntry.STORED);
+            check("STORED arsc tetap STORED",
+                    zf.getEntry("resources.arsc").getMethod() == ZipEntry.STORED);
+            check("DEFLATED dex tetap DEFLATED",
+                    zf.getEntry("classes.dex").getMethod() == ZipEntry.DEFLATED);
+            check("isi .so identik", java.util.Arrays.equals(
+                    readAllBytes(zf.getInputStream(zf.getEntry("lib/x86_64/libnative.so"))),
+                    soBytes));
+            check("isi arsc identik", java.util.Arrays.equals(
+                    readAllBytes(zf.getInputStream(zf.getEntry("resources.arsc"))),
+                    arscBytes));
+        }
+
+        long soOff = dataOffset(r.outputFile, "lib/x86_64/libnative.so");
+        long arscOff = dataOffset(r.outputFile, "resources.arsc");
+        check("data .so sejajar 16 KB", soOff % Repackager.SO_ALIGN == 0);
+        check("data arsc sejajar 4 KB", arscOff % Repackager.STORED_ALIGN == 0);
+        check("tanda tangan clone valid", ApkSigner.verifyApk(r.outputFile));
+    }
+
+    private static void putStored(java.util.zip.ZipOutputStream zos, String name, byte[] data)
+            throws java.io.IOException {
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(data);
+        ZipEntry e = new ZipEntry(name);
+        e.setMethod(ZipEntry.STORED);
+        e.setSize(data.length);
+        e.setCompressedSize(data.length);
+        e.setCrc(crc.getValue());
+        zos.putNextEntry(e);
+        zos.write(data);
+        zos.closeEntry();
+    }
+
+    /** Offset awal DATA sebuah entri (dihitung dari central + local header). */
+    private static long dataOffset(File apk, String entryName) throws java.io.IOException {
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(apk, "r")) {
+            long len = raf.length();
+            long p = len - 22;
+            long minP = Math.max(0, len - 66000);
+            byte[] sig = {0x50, 0x4b, 0x05, 0x06};
+            byte[] b4 = new byte[4];
+            while (p >= minP) {
+                raf.seek(p);
+                raf.readFully(b4);
+                if (java.util.Arrays.equals(b4, sig)) {
+                    break;
+                }
+                p--;
+            }
+            raf.seek(p + 16);
+            byte[] cd = new byte[4];
+            raf.readFully(cd);
+            long cdOffset = (cd[0] & 0xffL) | ((cd[1] & 0xffL) << 8)
+                    | ((cd[2] & 0xffL) << 16) | ((cd[3] & 0xffL) << 24);
+            raf.seek(cdOffset);
+            while (true) {
+                byte[] hdr = new byte[46];
+                raf.readFully(hdr);
+                if (hdr[0] != 0x50 || hdr[1] != 0x4b || hdr[2] != 0x01 || hdr[3] != 0x02) {
+                    break;
+                }
+                int nameLen = (hdr[28] & 0xff) | ((hdr[29] & 0xff) << 8);
+                int extraLen = (hdr[30] & 0xff) | ((hdr[31] & 0xff) << 8);
+                int commentLen = (hdr[32] & 0xff) | ((hdr[33] & 0xff) << 8);
+                long locOff = (hdr[42] & 0xffL) | ((hdr[43] & 0xffL) << 8)
+                        | ((hdr[44] & 0xffL) << 16) | ((hdr[45] & 0xffL) << 24);
+                byte[] nb = new byte[nameLen];
+                raf.readFully(nb);
+                String nm = new String(nb, StandardCharsets.UTF_8);
+                if (nm.equals(entryName)) {
+                    raf.seek(locOff + 26);
+                    byte[] l2 = new byte[4];
+                    raf.readFully(l2);
+                    int lName = (l2[0] & 0xff) | ((l2[1] & 0xff) << 8);
+                    int lExtra = (l2[2] & 0xff) | ((l2[3] & 0xff) << 8);
+                    return locOff + 30 + lName + lExtra;
+                }
+                raf.skipBytes(extraLen + commentLen);
+            }
+            throw new java.io.IOException("entri tidak ditemukan: " + entryName);
+        }
+    }
+
+    private static byte[] readAllBytes(java.io.InputStream in) throws java.io.IOException {
+        try (java.io.InputStream stream = in) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = stream.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            return out.toByteArray();
+        }
     }
 
     private static void testEdgeCases(ApkSigner.SigningKey key, File workDir) throws Exception {

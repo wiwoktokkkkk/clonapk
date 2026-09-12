@@ -148,11 +148,18 @@ public final class Repackager {
 
         // Tahap 2: salin isi ke zip sementara (tanpa tanda tangan lama), lalu
         // tandatangani berkas-ke-berkas. Memori tetap konstan berapa pun ukuran APK.
+        //
+        // Dua hal yang WAJIB dijaga agar APK diterima installer & bisa mmap:
+        //  1. Metode kompresi per entri dipertahankan. Berkas .so pada APK modern
+        //     (extractNativeLibs=false) tersimpan STORED; memampatkannya membuat
+        //     instalasi gagal ("tidak kompatibel") atau aplikasi crash saat start.
+        //  2. Data entri STORED disejajarkan (zipalign): .so ke batas 16 KB
+        //     (syarat Android 15+), entri STORED lain ke batas 4 KB.
         File tmpUnsigned = File.createTempFile("clonapk-unsigned", ".apk");
         try {
+            CountingOutputStream cos = new CountingOutputStream(new FileOutputStream(tmpUnsigned));
             try (ZipFile zf = new ZipFile(source);
-                 ZipOutputStream zos =
-                         new ZipOutputStream(new FileOutputStream(tmpUnsigned))) {
+                 ZipOutputStream zos = new ZipOutputStream(cos)) {
                 int i = 0;
                 Enumeration<? extends ZipEntry> en = zf.entries();
                 while (en.hasMoreElements()) {
@@ -173,6 +180,21 @@ public final class Repackager {
                         dir.setCompressedSize(0);
                         dir.setCrc(0);
                         zos.putNextEntry(dir);
+                        zos.closeEntry();
+                    } else if (ze.getMethod() == ZipEntry.STORED) {
+                        int align = name.endsWith(".so") ? SO_ALIGN : STORED_ALIGN;
+                        ZipEntry copy = new ZipEntry(name);
+                        copy.setMethod(ZipEntry.STORED);
+                        copy.setSize(ze.getSize());
+                        copy.setCompressedSize(ze.getSize());
+                        copy.setCrc(ze.getCrc());
+                        copy.setTime(ze.getTime());
+                        byte[] pad = alignmentExtra(cos.count, name, align);
+                        if (pad != null) {
+                            copy.setExtra(pad);
+                        }
+                        zos.putNextEntry(copy);
+                        copyEntry(zf, ze, zos);
                         zos.closeEntry();
                     } else {
                         zos.putNextEntry(new ZipEntry(name));
@@ -237,6 +259,63 @@ public final class Repackager {
             while ((n = in.read(buf)) > 0) {
                 zos.write(buf, 0, n);
             }
+        }
+    }
+
+    /** Penjajaran zipalign: .so 16 KB (Android 15+), STORED lain 4 KB. */
+    static final int SO_ALIGN = 16384;
+    static final int STORED_ALIGN = 4096;
+    private static final int LOCAL_HEADER_FIXED = 30;
+    private static final int EXTRA_MIN = 4;
+
+    /**
+     * Hitung field extra (id 0xd935, gaya zipalign) supaya DATA entri STORED
+     * mulai pada batas {@code align}. {@code posNow} = offset berkas saat ini
+     * (tepat sebelum local header entri ditulis).
+     */
+    static byte[] alignmentExtra(long posNow, String name, int align) {
+        int nameLen;
+        try {
+            nameLen = name.getBytes("UTF-8").length;
+        } catch (IOException e) {
+            nameLen = name.length();
+        }
+        long dataStart = posNow + LOCAL_HEADER_FIXED + nameLen;
+        int pad = (int) ((align - (dataStart % align)) % align);
+        if (pad == 0) {
+            return null;
+        }
+        if (pad < EXTRA_MIN) {
+            // field extra minimal 4 byte (id + panjang); geser satu blok penuh
+            pad += align;
+        }
+        byte[] extra = new byte[pad];
+        extra[0] = (byte) 0x35; // id 0xd935 little-endian
+        extra[1] = (byte) 0xd9;
+        int payload = pad - EXTRA_MIN;
+        extra[2] = (byte) (payload & 0xff);
+        extra[3] = (byte) ((payload >> 8) & 0xff);
+        return extra;
+    }
+
+    /** Pembungkus penghitung byte yang sudah ditulis (untuk perhitungan penjajaran). */
+    static final class CountingOutputStream extends java.io.FilterOutputStream {
+        long count;
+
+        CountingOutputStream(java.io.OutputStream out) {
+            super(out);
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+            count++;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+            count += len;
         }
     }
 

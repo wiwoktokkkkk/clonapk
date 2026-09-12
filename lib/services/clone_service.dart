@@ -72,6 +72,7 @@ class CloneService {
     required String newPackage,
     String? newLabel,
     bool deepScan = false,
+    List<String> splits = const [],
   }) async {
     try {
       final res = await _channel.invokeMethod<Map<dynamic, dynamic>>('clone', {
@@ -79,6 +80,7 @@ class CloneService {
         'newPackage': newPackage,
         'newLabel': newLabel,
         'deepScan': deepScan,
+        'splits': splits,
       });
       if (res == null) {
         throw const CloneFailure('Proses clone tidak mengembalikan hasil.');
@@ -101,9 +103,10 @@ class CloneService {
     }
   }
 
-  Future<void> installApk(String path) async {
+  Future<void> installApk(String path, {List<String> extraPaths = const []}) async {
     try {
-      await _channel.invokeMethod<bool>('installApk', {'path': path});
+      await _channel.invokeMethod<bool>(
+          'installApk', {'path': path, 'extraPaths': extraPaths});
     } on PlatformException catch (e) {
       throw CloneFailure(e.message ?? 'Gagal membuka pemasang.');
     }

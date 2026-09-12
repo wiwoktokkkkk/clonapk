@@ -196,7 +196,8 @@ class _ResultScreenState extends State<ResultScreen> {
                           size: 15, color: CupertinoColors.systemGrey3),
                       onTap: _busy
                           ? null
-                          : () => _guard(() => _service.installApk(r.path)),
+                          : () => _guard(() => _service.installApk(r.path,
+                              extraPaths: r.extraPaths)),
                     ),
                     IosRow(
                       title: 'Bagikan APK',

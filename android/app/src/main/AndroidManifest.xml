@@ -41,6 +41,31 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Menerima hasil sesi PackageInstaller (pemasangan multi-berkas
+             base+split) dan membuka layar konfirmasi pemasangan sistem. -->
+        <receiver
+            android:name=".ClonApkInstallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.clonapk.app.INSTALL_DONE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Dibutuhkan ruang virtual: menerima penyediaan profil kerja sehingga
+             ClonApk menjadi profile owner dan bisa memasang instance kedua
+             sebuah aplikasi (package sama) tanpa memodifikasi APK. -->
+        <receiver
+            android:name=".ClonApkDeviceAdmin"
+            android:exported="false"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Diperlukan untuk memasang/membagikan APK pada Android 7.0+
              karena URI file:// ditolak. -->
         <provider

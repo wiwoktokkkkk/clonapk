@@ -7,6 +7,7 @@ class CloneResult {
     required this.originalPackage,
     required this.sizeBytes,
     required this.minSdkLowered,
+    this.extraPaths = const [],
   });
 
   factory CloneResult.fromMap(Map<dynamic, dynamic> m) => CloneResult(
@@ -16,6 +17,9 @@ class CloneResult {
         originalPackage: (m['originalPackage'] ?? '') as String,
         sizeBytes: (m['sizeBytes'] ?? 0) as int,
         minSdkLowered: (m['minSdkLowered'] ?? false) as bool,
+        extraPaths: ((m['extraPaths'] ?? const <dynamic>[]) as List)
+            .map((e) => e.toString())
+            .toList(),
       );
 
   final String path;
@@ -24,6 +28,9 @@ class CloneResult {
   final String originalPackage;
   final int sizeBytes;
   final bool minSdkLowered;
+
+  /// Bagian split yang ikut di-clone; dipasang bersama base dalam satu sesi.
+  final List<String> extraPaths;
 }
 
 /// Perkembangan proses clone yang dikirim dari sisi Android.
@@ -80,6 +87,7 @@ class HistoryItem {
     this.newPackage = '',
     this.installed = false,
     this.type = 'apk',
+    this.extraPaths = const [],
   });
 
   factory HistoryItem.fromMap(Map<dynamic, dynamic> m) => HistoryItem(
@@ -92,6 +100,9 @@ class HistoryItem {
         newPackage: (m['newPackage'] ?? '') as String,
         installed: (m['installed'] ?? false) as bool,
         type: (m['type'] ?? 'apk') as String,
+        extraPaths: ((m['extraPaths'] ?? const <dynamic>[]) as List)
+            .map((e) => e.toString())
+            .toList(),
       );
 
   final String path;
@@ -102,6 +113,7 @@ class HistoryItem {
   final String originalPackage;
   final String newPackage;
   final bool installed;
+  final List<String> extraPaths;
 
   /// 'apk' (clone package baru) atau 'virtual' (package sama di ruang virtual).
   final String type;

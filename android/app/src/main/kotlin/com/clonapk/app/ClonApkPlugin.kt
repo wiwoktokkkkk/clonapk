@@ -140,6 +140,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     "versionName" to (versionNameOf(pi) ?: "-"),
                     "isSystem" to isSystem,
                     "apkPath" to (app.sourceDir ?: ""),
+                    "splitPaths" to (app.splitSourceDirs?.toList() ?: emptyList<String>()),
                     "sizeBytes" to sizeOf(app.sourceDir),
                     "iconPath" to iconPathFor(pkg, app.loadIcon(pm))
                 )
@@ -166,23 +167,48 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val newPackage = call.argument<String>("newPackage") ?: error("newPackage wajib diisi")
         val newLabel = call.argument<String>("newLabel")
         val deepScan = call.argument<Boolean>("deepScan") ?: false
+        // Aplikasi modern terpasang sebagai beberapa berkas (base + split untuk
+        // ABI/kepadatan layar/bahasa). Semua bagian wajib ikut di-clone dan
+        // dipasang bersama-sama, kalau tidak installer menolak ("tidak
+        // kompatibel") karena pustaka native hilang.
+        val splits = call.argument<List<String>>("splits") ?: emptyList()
 
         emit("Menyiapkan", 2)
         val outDir = exportDir()
         val name = ApkUtil.safeFileName(newLabel ?: newPackage.substringAfterLast('.'), newPackage)
+        val spanBase = 60.0 / (1 + splits.size)
+        var done = 0
         val res = Repackager.clone(source, newPackage, outDir, name, signingKey, deepScan) { stage, pct ->
-            emit(stage, pct)
+            emit(stage, (done * spanBase + pct * spanBase / 100.0).toInt())
+        }
+        done++
+
+        val extras = ArrayList<String>()
+        for ((idx, sp) in splits.withIndex()) {
+            val splitFile = File(sp)
+            if (!splitFile.isFile) continue
+            val splitRes = Repackager.clone(
+                splitFile, newPackage, outDir,
+                "split-${idx + 1}.apk", signingKey, deepScan
+            ) { _, _ -> }
+            extras.add(splitRes.outputFile.absolutePath)
+            done++
+            emit("Menggandakan bagian ${idx + 1}/${splits.size}", (done * spanBase).toInt())
         }
 
         val out = res.outputFile
-        recordHistory(res.originalPackage, res.newPackage, newLabel ?: "", out)
+        recordHistory(
+            res.originalPackage, res.newPackage, newLabel ?: "", out,
+            extras = extras
+        )
         return mapOf(
             "path" to out.absolutePath,
             "fileName" to out.name,
             "newPackage" to res.newPackage,
             "originalPackage" to res.originalPackage,
             "sizeBytes" to out.length(),
-            "minSdkLowered" to res.minSdkLowered
+            "minSdkLowered" to res.minSdkLowered,
+            "extraPaths" to extras
         )
     }
 
@@ -209,7 +235,8 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         newPkg: String,
         label: String,
         out: File,
-        type: String = "apk"
+        type: String = "apk",
+        extras: List<String> = emptyList()
     ) {
         val rec = org.json.JSONObject()
         rec.put("originalPackage", original)
@@ -219,6 +246,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         rec.put("path", out.absolutePath)
         rec.put("at", System.currentTimeMillis())
         rec.put("type", type)
+        rec.put("extraPaths", org.json.JSONArray(extras))
         val fresh = org.json.JSONArray()
         fresh.put(rec)
         val old = readHistoryArray()
@@ -266,6 +294,9 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     "originalPackage" to o.optString("originalPackage", ""),
                     "newPackage" to pkg,
                     "type" to o.optString("type", "apk"),
+                    "extraPaths" to o.optJSONArray("extraPaths")?.let { arr ->
+                        (0 until arr.length()).map { arr.getString(it) }
+                    } ?: emptyList<String>(),
                     "installed" to
                             if (o.optString("type", "apk") == "virtual")
                                 virtualInstalled(pkg)
@@ -350,12 +381,54 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun installApk(call: MethodCall): Boolean {
         val f = fileFrom(call)
+        val extras = call.argument<List<String>>("extraPaths") ?: emptyList()
+        if (extras.isNotEmpty()) {
+            // Multi-berkas (base + split): wajib satu sesi PackageInstaller,
+            // bukan ACTION_VIEW — installer biasa hanya menerima satu APK.
+            return installSession(f, extras)
+        }
         val uri = uriFor(f)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(intent)
+        return true
+    }
+
+    /** Pasang base + split sekaligus lewat satu sesi PackageInstaller. */
+    private fun installSession(main: File, extras: List<String>): Boolean {
+        val files = ArrayList<File>()
+        files.add(main)
+        for (p in extras) {
+            val f = File(p)
+            if (f.isFile) files.add(f)
+        }
+        val pi = context.packageManager.packageInstaller
+        val params = android.content.pm.PackageInstaller.SessionParams(
+            android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL
+        )
+        var total = 0L
+        for (f in files) total += f.length()
+        params.setSize(total)
+        val sessionId = pi.createSession(params)
+        pi.openSession(sessionId).use { session ->
+            for (f in files) {
+                session.openWrite(f.name, 0, f.length()).use { out ->
+                    f.inputStream().use { input -> input.copyTo(out) }
+                }
+            }
+            val done = Intent(context, ClonApkInstallReceiver::class.java)
+                .setAction("com.clonapk.app.INSTALL_DONE")
+            val pending = android.app.PendingIntent.getBroadcast(
+                context,
+                sessionId,
+                done,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    android.app.PendingIntent.FLAG_MUTABLE
+            )
+            session.commit(pending.intentSender)
+        }
         return true
     }
 

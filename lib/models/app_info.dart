@@ -8,6 +8,7 @@ class AppInfo {
     required this.apkPath,
     required this.sizeBytes,
     this.iconPath,
+    this.splitPaths = const [],
   });
 
   factory AppInfo.fromMap(Map<dynamic, dynamic> m) => AppInfo(
@@ -18,6 +19,9 @@ class AppInfo {
         apkPath: (m['apkPath'] ?? '') as String,
         sizeBytes: (m['sizeBytes'] ?? 0) as int,
         iconPath: m['iconPath'] as String?,
+        splitPaths: ((m['splitPaths'] ?? const <dynamic>[]) as List)
+            .map((e) => e.toString())
+            .toList(),
       );
 
   final String packageName;
@@ -27,6 +31,9 @@ class AppInfo {
   final String apkPath;
   final int sizeBytes;
   final String? iconPath;
+
+  /// Bagian split APK (ABI/kepadatan/bahasa); ikut di-clone & dipasang.
+  final List<String> splitPaths;
 
   /// Nama berkas APK sumber, untuk ditampilkan di baris detail.
   String get sourceFileName {

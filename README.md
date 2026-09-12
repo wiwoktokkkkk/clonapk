@@ -54,6 +54,20 @@ install ulang — lewat **profil kerja Android** (managed profile):
 > Proses persetujuan profil kerja berbeda-beda antar merek ponsel dan tidak
 > bisa diuji otomatis tanpa perangkat; kode terverifikasi kompilasi lewat CI.
 
+## 🔧 Perbaikan kompatibilitas (baru di v1.3)
+
+Dua penyebab klasik hasil clone "tidak kompatibel dengan HP" sudah diatasi:
+
+- **Split APK ikut di-clone.** Aplikasi modern (WhatsApp dkk.) terpasang
+  sebagai beberapa berkas: `base.apk` + bagian ABI (`arm64-v8a`), kepadatan
+  layar, dan bahasa. Meng-clone `base.apk` saja membuat pustaka native
+  hilang → installer menolak. Kini semua bagian ikut digandakan dan
+  dipasang sekaligus lewat satu sesi `PackageInstaller`.
+- **`.so` tetap STORED + tersejajarkan.** Entri `STORED` (termasuk pustaka
+  native pada APK `extractNativeLibs=false`) dipertahankan apa adanya dan
+  disejajarkan seperti `zipalign`: `.so` ke batas 16 KB (syarat
+  Android 15+), entri STORED lain 4 KB. Terverifikasi uji JVM (101 check).
+
 ## Cara kerja mesin clone
 
 1. **Baca `AndroidManifest.xml` biner (AXML).** Manifest di dalam APK bukan
