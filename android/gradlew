@@ -1,0 +1,5 @@
+#!/bin/sh
+# Skrip peluncur Gradle Wrapper standar.
+# Unduh distribusi Gradle sesuai gradle-wrapper.properties bila belum ada.
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
+exec java -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain "$@"

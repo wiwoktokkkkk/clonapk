@@ -1,0 +1,28 @@
+# --- Flutter ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+build/
+android/local.properties
+android/app/src/main/java/io/flutter/
+android/flutter/ephemeral/
+
+# --- Android / Gradle ---
+.gradle/
+android/.gradle/
+android/captures/
+android/gradlew.bat
+*.iml
+.idea/
+
+# --- Alat uji (dependensi diunduh otomatis oleh run-core-tests.sh) ---
+tools/lib/*.jar
+
+# --- Lain-lain ---
+*.log
+.DS_Store
+.vscode/
+coverage/
+node_modules/

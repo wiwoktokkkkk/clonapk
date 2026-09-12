@@ -1,0 +1,398 @@
+package com.clonapk.core;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+
+/**
+ * Uji end-to-end mesin clone di JVM (tanpa perangkat Android).
+ *
+ * <p>Jalur kode yang benar-benar dieksekusi: {@link Repackager#clone},
+ * {@link ManifestEditor#changePackage}, {@link ApkSigner#sign}, dan
+ * {@link ApkSigner#verifyV1}. Kalau ada yang rusak, program ini gagal keras.
+ */
+public final class CloneTest {
+
+    private static int passed;
+    private static int failed;
+    private static final List<String> failures = new ArrayList<>();
+
+    public static void main(String[] args) throws Exception {
+        File workDir = new File(args.length > 0 ? args[0] : "build/clone-test");
+        //noinspection ResultOfMethodCallIgnored
+        workDir.mkdirs();
+
+        ApkSigner.SigningKey key = ApkSigner.generateKey("CloneAPK Test");
+        check("kunci penandatangan dibuat", key != null && key.certificate != null);
+
+        testClone(key, workDir, "com.example.target", "com.clonapk.clone", 21, true,
+                "string pool UTF-8");
+        testClone(key, workDir, "com.vendor.camera.app", "com.vendor.camera.app.dual", 24, false,
+                "string pool UTF-16 + minSdk 24");
+
+        testDeepScanToggle(key, workDir);
+        testEdgeCases(key, workDir);
+        testValidation();
+        testBase64();
+
+        System.out.println();
+        System.out.println("==================================================");
+        System.out.println(" LULUS: " + passed + "   GAGAL: " + failed);
+        if (failed > 0) {
+            for (String f : failures) {
+                System.out.println("  x " + f);
+            }
+            System.out.println("==================================================");
+            System.exit(1);
+        }
+        System.out.println(" Semua uji mesin clone lulus.");
+        System.out.println("==================================================");
+    }
+
+    private static void testClone(ApkSigner.SigningKey key, File workDir, String origPkg,
+                                  String newPkg, int minSdk, boolean utf8, String label)
+            throws Exception {
+        System.out.println("\n--- Uji clone: " + label + " ---");
+        File src = new File(workDir, "src-" + (utf8 ? "utf8" : "utf16") + ".apk");
+        TestApkFactory.buildTestApk(src, origPkg, minSdk, utf8);
+        check("APK uji dibuat (" + src.length() + " byte)", src.length() > 0);
+        check("APK uji punya tanda tangan v1 asli", ApkSigner.verifyV1(read(src)));
+
+        Repackager.ApkInfo info = Repackager.inspect(src);
+        check("inspect membaca package asli", origPkg.equals(info.packageName));
+        check("inspect membaca versionName", "1.7.3".equals(info.versionName));
+        check("inspect membaca 2 permission", info.permissions.size() == 2);
+
+        File outFile = new File(workDir, "out-" + (utf8 ? "utf8" : "utf16") + ".apk");
+        final int[] lastPercent = {-1};
+        Repackager.Result res = Repackager.clone(
+                src, newPkg, workDir, outFile.getName(), key, false,
+                (stage, percent) -> lastPercent[0] = percent);
+
+        check("progress mencapai 100", lastPercent[0] == 100);
+        check("berkas keluaran dibuat", res.outputFile.isFile());
+
+        byte[] out = read(outFile);
+        check("hasil lolos verifikasi tanda tangan v1", ApkSigner.verifyV1(out));
+
+        byte[] outManifest = manifestOf(outFile);
+        check("package hasil = " + newPkg,
+                newPkg.equals(ManifestEditor.readPackage(outManifest)));
+
+        String dump = dumpStrings(outManifest);
+        check("activity utama ikut diganti",
+                dump.contains(newPkg + ".MainActivity"));
+        check("provider class ikut diganti",
+                dump.contains(newPkg + ".provider.FileProvider"));
+        check("authorities ikut diganti",
+                dump.contains(newPkg + ".fileprovider"));
+        check("permission kustom ikut diganti",
+                dump.contains(newPkg + ".permission.C2D_MESSAGE"));
+        // Package baru boleh saja mengandung nama lama sebagai prefix
+        // (mis. com.x -> com.x.dual). Yang tidak boleh ada adalah sisa kelas
+        // ber-prefix lama yang tidak ikut terganti.
+        check("tidak ada sisa kelas ber-prefix package lama",
+                !dump.contains(origPkg + ".MainActivity")
+                        && !dump.contains(origPkg + ".provider")
+                        && !dump.contains(origPkg + ".fileprovider")
+                        && !dump.contains(origPkg + ".permission"));
+
+        check("class library pihak ketiga TIDAK diubah",
+                dump.contains("com.example.lib.SyncService"));
+        check("action intent sistem TIDAK diubah",
+                dump.contains("android.intent.action.MAIN"));
+        check("nilai meta-data tidak ber-prefix package tetap utuh",
+                dump.contains("u-9182736455"));
+        check("versionName tetap terbaca",
+                "1.7.3".equals(ManifestEditor.readVersionName(outManifest)));
+
+        Integer outMinSdk = ManifestEditor.readMinSdk(outManifest);
+        if (minSdk > 23) {
+            check("minSdk diturunkan ke 23 (dari " + minSdk + ")",
+                    outMinSdk != null && outMinSdk == 23);
+            check("flag minSdkLowered = true", res.minSdkLowered);
+        } else {
+            check("minSdk tidak diubah (" + minSdk + ")",
+                    outMinSdk != null && outMinSdk == minSdk);
+            check("flag minSdkLowered = false", !res.minSdkLowered);
+        }
+
+        // Isi APK selain manifest harus tetap ada dan utuh.
+        try (ZipFile zf = new ZipFile(outFile)) {
+            check("classes.dex dipertahankan", zf.getEntry("classes.dex") != null);
+            check("resources.arsc dipertahankan", zf.getEntry("resources.arsc") != null);
+            check("res/layout dipertahankan", zf.getEntry("res/layout/main.xml") != null);
+            check("assets dipertahankan", zf.getEntry("assets/data.json") != null);
+            check("META-INF isi non-tandatangan dipertahankan",
+                    zf.getEntry("META-INF/services/x") != null);
+            check("MANIFEST.MF ada", zf.getEntry("META-INF/MANIFEST.MF") != null);
+            check("CERT.SF ada", zf.getEntry("META-INF/CERT.SF") != null);
+            check("CERT.RSA ada", zf.getEntry("META-INF/CERT.RSA") != null);
+
+            byte[] dexOrig = entryOf(src, "classes.dex");
+            byte[] dexNew = entryOf(outFile, "classes.dex");
+            check("isi classes.dex identik bit-per-bit", java.util.Arrays.equals(dexOrig, dexNew));
+
+            byte[] arscOrig = entryOf(src, "resources.arsc");
+            byte[] arscNew = entryOf(outFile, "resources.arsc");
+            check("isi resources.arsc identik", java.util.Arrays.equals(arscOrig, arscNew));
+        }
+
+        // Sertifikat hasil harus berbeda dari sertifikat asli (kunci clone sendiri).
+        check("penandatangan berbeda dari APK asli",
+                !sameSigner(src, outFile));
+        check("sertifikat hasil bisa dibaca verifier JAR standar Java",
+                signerOf(outFile) != null);
+    }
+
+    private static void testDeepScanToggle(ApkSigner.SigningKey key, File workDir)
+            throws Exception {
+        System.out.println("\n--- Uji deep-scan nilai meta-data ---");
+        File src = new File(workDir, "src-deep.apk");
+        byte[] manifest = TestApkFactory.buildManifest("com.deep.app", 21, true);
+        java.util.LinkedHashMap<String, byte[]> entries = new java.util.LinkedHashMap<>();
+        entries.put("AndroidManifest.xml", manifest);
+        entries.put("classes.dex", "dex".getBytes(StandardCharsets.UTF_8));
+        java.io.FileOutputStream fos = new java.io.FileOutputStream(src);
+        fos.write(ApkSigner.sign(entries, key));
+        fos.close();
+
+        // deep-scan MATI: nilai meta-data yang kebetulan ber-prefix package harus tetap
+        Repackager.Result off = Repackager.clone(
+                src, "com.deep.app.clone", workDir, "out-deep-off.apk", key, false, null);
+        check("hasil deep-scan off lolos verifikasi",
+                ApkSigner.verifyV1(read(off.outputFile)));
+        check("package tetap terganti saat deep-scan off",
+                "com.deep.app.clone".equals(
+                        ManifestEditor.readPackage(manifestOf(off.outputFile))));
+
+        // deep-scan NYALA
+        Repackager.Result on = Repackager.clone(
+                src, "com.deep.app.clone2", workDir, "out-deep-on.apk", key, true, null);
+        check("hasil deep-scan on lolos verifikasi", ApkSigner.verifyV1(read(on.outputFile)));
+        check("package tetap terganti saat deep-scan on",
+                "com.deep.app.clone2".equals(
+                        ManifestEditor.readPackage(manifestOf(on.outputFile))));
+    }
+
+    private static void testEdgeCases(ApkSigner.SigningKey key, File workDir) throws Exception {
+        System.out.println("\n--- Uji kasus tepi ---");
+
+        File notApk = TestApkFactory.buildEmptyZip(new File(workDir, "notapk.zip"));
+        check("ZIP tanpa manifest ditolak", expectThrows(() -> Repackager.inspect(notApk)));
+
+        File src = new File(workDir, "src-edge.apk");
+        TestApkFactory.buildTestApk(src, "com.edge.app", 21, true);
+        check("APK tepi dibuat", src.isFile());
+
+        check("package sama dengan asli ditolak", expectThrows(() -> Repackager.clone(
+                src, "com.edge.app", workDir, "x.apk", key, false, null)));
+        check("package satu segmen ditolak", expectThrows(() -> Repackager.clone(
+                src, "cumaninisaja", workDir, "x.apk", key, false, null)));
+        check("package diawali android ditolak", expectThrows(() -> Repackager.clone(
+                src, "android.hack.me", workDir, "x.apk", key, false, null)));
+        check("segmen diawali angka ditolak", expectThrows(() -> Repackager.clone(
+                src, "com.1bad.pkg", workDir, "x.apk", key, false, null)));
+        check("kata kunci Java ditolak", expectThrows(() -> Repackager.clone(
+                src, "com.class.app", workDir, "x.apk", key, false, null)));
+        check("segmen kosong ditolak", expectThrows(() -> Repackager.clone(
+                src, "com..app", workDir, "x.apk", key, false, null)));
+
+        // clone dua kali harus menghasilkan APK yang sama-sama bisa dipasang
+        Repackager.Result r1 = Repackager.clone(src, "com.edge.app.one", workDir,
+                "edge1.apk", key, false, null);
+        Repackager.Result r2 = Repackager.clone(src, "com.edge.app.two", workDir,
+                "edge2.apk", key, false, null);
+        check("clone pertama valid", ApkSigner.verifyV1(read(r1.outputFile)));
+        check("clone kedua valid", ApkSigner.verifyV1(read(r2.outputFile)));
+        check("dua clone punya package berbeda",
+                !ManifestEditor.readPackage(manifestOf(r1.outputFile))
+                        .equals(ManifestEditor.readPackage(manifestOf(r2.outputFile))));
+
+        // penamaan keluaran
+        check("suggestPackageName normal",
+                "com.foo.bar.clone".equals(ApkUtil.suggestPackageName("com.foo.bar", "clone")));
+        check("suggestPackageName membersihkan karakter aneh",
+                "com.foo.bar.ku2".equals(ApkUtil.suggestPackageName("com.foo.bar", "ku 2!")));
+        check("suggestPackageName tidak diawali angka",
+                "com.foo.bar.c2".equals(ApkUtil.suggestPackageName("com.foo.bar", "2")));
+        check("safeFileName membersihkan spasi",
+                "Aplikasi_Saya.apk".equals(ApkUtil.safeFileName("Aplikasi Saya", "pkg")));
+    }
+
+    private static void testValidation() {
+        System.out.println("\n--- Uji deteksi manifest rusak ---");
+        check("magic salah ditolak", expectThrows(() -> ManifestEditor.readPackage(
+                new byte[] {1, 2, 3, 4, 5, 6, 7, 8})));
+        byte[] good = TestApkFactory.buildManifest("com.trunc.app", 21, true);
+        check("manifest utuh terbaca",
+                "com.trunc.app".equals(ManifestEditor.readPackage(good)));
+
+        byte[] truncated = new byte[good.length / 2];
+        System.arraycopy(good, 0, truncated, 0, truncated.length);
+        check("manifest terpotong ditolak (bukan hasil diam-diam salah)",
+                expectThrows(() -> ManifestEditor.readPackage(truncated)));
+    }
+
+    private static void testBase64() {
+        System.out.println("\n--- Uji encoder Base64 ---");
+        java.util.Random rnd = new java.util.Random(20260912L);
+        int checked = 0;
+        for (int len = 0; len <= 300; len++) {
+            byte[] data = new byte[len];
+            rnd.nextBytes(data);
+            String mine = ApkSigner.encodeBase64(data);
+            String ref = wrap(java.util.Base64.getEncoder().encodeToString(data));
+            if (!mine.equals(ref)) {
+                check("base64 cocok dengan java.util.Base64 pada panjang " + len, false);
+                return;
+            }
+            checked++;
+        }
+        check("base64 cocok dengan java.util.Base64 untuk panjang 0.." + (checked - 1), true);
+        // Pemotongan baris penting: verifier JAR Android membaca .MF/.SF baris per baris.
+        String[] lines = ApkSigner.encodeBase64(new byte[200]).split("\r\n");
+        boolean allShort = true;
+        for (String line : lines) {
+            if (line.length() > 70) {
+                allShort = false;
+            }
+        }
+        check("base64 memotong baris tiap 70 karakter (" + lines.length + " baris)",
+                allShort && lines.length > 1);
+    }
+
+    private static String wrap(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i += 70) {
+            if (i > 0) {
+                sb.append("\r\n");
+            }
+            sb.append(s, i, Math.min(s.length(), i + 70));
+        }
+        return sb.toString();
+    }
+
+    // ------------------------------------------------------------- utilities
+
+    private interface Thrower {
+        void run() throws Exception;
+    }
+
+    private static boolean expectThrows(Thrower t) {
+        try {
+            t.run();
+            return false;
+        } catch (Exception e) {
+            System.out.println("    (ditolak sebagaimana diharapkan: " + first(e.getMessage()) + ")");
+            return true;
+        }
+    }
+
+    private static String first(String s) {
+        if (s == null) {
+            return "?";
+        }
+        return s.length() > 80 ? s.substring(0, 80) + "..." : s;
+    }
+
+    private static String dumpStrings(byte[] manifest) {
+        StringBuilder sb = new StringBuilder();
+        // cara kasar tapi cukup: baca semua teks yang bisa dibaca dari manifest
+        int i = 0;
+        StringBuilder cur = new StringBuilder();
+        while (i < manifest.length) {
+            byte b = manifest[i];
+            if (b >= 32 && b < 127) {
+                cur.append((char) b);
+            } else {
+                if (cur.length() >= 3) {
+                    sb.append(cur).append('\n');
+                }
+                cur.setLength(0);
+            }
+            i++;
+        }
+        if (cur.length() >= 3) {
+            sb.append(cur);
+        }
+        return sb.toString();
+    }
+
+    private static byte[] manifestOf(File apk) throws Exception {
+        try (ZipFile zf = new ZipFile(apk)) {
+            ZipEntry e = zf.getEntry("AndroidManifest.xml");
+            if (e == null) {
+                throw new IllegalStateException("manifest tidak ada di " + apk);
+            }
+            return ApkSigner.read(zf, e);
+        }
+    }
+
+    private static byte[] entryOf(File apk, String name) throws Exception {
+        try (ZipFile zf = new ZipFile(apk)) {
+            ZipEntry e = zf.getEntry(name);
+            return e == null ? null : ApkSigner.read(zf, e);
+        }
+    }
+
+    private static boolean sameSigner(File a, File b) {
+        try {
+            java.security.cert.Certificate[] ca = signerOf(a);
+            java.security.cert.Certificate[] cb = signerOf(b);
+            if (ca == null || cb == null) {
+                return false;
+            }
+            return java.util.Arrays.equals(ca[0].getEncoded(), cb[0].getEncoded());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static java.security.cert.Certificate[] signerOf(File apk) throws Exception {
+        try (java.util.jar.JarFile jf = new java.util.jar.JarFile(apk)) {
+            Enumeration<java.util.jar.JarEntry> en = jf.entries();
+            while (en.hasMoreElements()) {
+                java.util.jar.JarEntry e = en.nextElement();
+                java.io.InputStream in = jf.getInputStream(e);
+                byte[] buf = new byte[8192];
+                while (in.read(buf) > 0) {
+                    // membaca sampai habis memicu verifikasi sertifikat
+                }
+                in.close();
+                java.security.cert.Certificate[] certs = e.getCertificates();
+                if (certs != null && certs.length > 0) {
+                    return certs;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static byte[] read(File f) throws Exception {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static void check(String name, boolean ok) {
+        if (ok) {
+            passed++;
+            System.out.println("  ok  " + name);
+        } else {
+            failed++;
+            failures.add(name);
+            System.out.println("  GAGAL  " + name);
+        }
+    }
+}

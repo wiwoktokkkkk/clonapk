@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deklarasi lokasi berkas yang boleh dibagikan lewat FileProvider.
+  external-files-path mencakup context.getExternalFilesDir(null) tempat
+  APK hasil clone disimpan.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-files-path
+        name="clones"
+        path="clones/" />
+    <external-files-path
+        name="external_root"
+        path="." />
+    <files-path
+        name="internal"
+        path="." />
+    <cache-path
+        name="cache"
+        path="." />
+</paths>
