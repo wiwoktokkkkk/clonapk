@@ -203,6 +203,47 @@ class CloneService {
     if (path == null || path.isEmpty) return null;
     return path;
   }
+
+  // ------------------------------------------------------------ ruang virtual
+
+  /// Status ruang virtual: {profileOwner, hasProfile}.
+  Future<Map<String, bool>> virtualStatus() async {
+    final m = await _channel
+        .invokeMethod<Map<dynamic, dynamic>>('virtualStatus');
+    return {
+      'profileOwner': (m?['profileOwner'] ?? false) as bool,
+      'hasProfile': (m?['hasProfile'] ?? false) as bool,
+    };
+  }
+
+  /// Buka layar persetujuan profil kerja milik sistem.
+  Future<bool> provisionProfile() =>
+      _channel.invokeMethod<bool>('provisionProfile').then((v) => v ?? false);
+
+  /// Pasang instance kedua (package sama) ke ruang virtual.
+  Future<Map<String, dynamic>> cloneVirtual(String packageName) async {
+    try {
+      final m = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+          'cloneVirtual', {'package': packageName});
+      return {
+        'newPackage': (m?['newPackage'] ?? packageName) as String,
+        'type': (m?['type'] ?? 'virtual') as String,
+      };
+    } on PlatformException catch (e) {
+      throw CloneFailure(
+          e.message ?? 'Ruang virtual menolak pemasangan aplikasi ini.');
+    }
+  }
+
+  /// Jalankan aplikasi di dalam ruang virtual.
+  Future<bool> launchVirtual(String packageName) => _channel
+      .invokeMethod<bool>('launchVirtual', {'package': packageName})
+      .then((v) => v ?? false);
+
+  /// Buka clone apa pun sesuai jenisnya.
+  Future<bool> openClone(HistoryItem item) => item.isVirtual
+      ? launchVirtual(item.originalPackage)
+      : launchApp(item.newPackage);
 }
 
 /// Kegagalan yang pesannya aman ditampilkan langsung ke pengguna.

@@ -34,6 +34,26 @@ seperti aplikasi iOS di atas Android.
 - Hasil bisa dipasang, dibagikan, atau dihapus; riwayat clone tersimpan.
 - Mode gelap/terang mengikuti sistem.
 
+## 🕶️ Ruang Virtual (baru di v1.2)
+
+Clone dengan **package yang sama persis** — tanpa modifikasi APK dan tanpa
+install ulang — lewat **profil kerja Android** (managed profile):
+
+1. Ketuk **Aktifkan** pada kelompok "Ruang virtual" → setujui layar
+   "Siapkan profil kerja" milik sistem (satu kali saja).
+2. Ketuk **Clone** pada aplikasi mana pun → instance kedua langsung terbuka
+   dengan nama & ikon yang sama, tanpa package `.clone`.
+
+- Tidak ada bentrokan package, tidak ada repackaging/re-signing — APK asli
+  dipakai apa adanya.
+- Batas Android: satu profil kerja per perangkat; sebagian aplikasi dengan
+  proteksi ketat bisa menolak berjalan di dalamnya.
+- Kalau ruang virtual tidak tersedia di perangkatmu, **mode APK** (package
+  otomatis + installer sistem) selalu tersedia sebagai cadangan.
+
+> Proses persetujuan profil kerja berbeda-beda antar merek ponsel dan tidak
+> bisa diuji otomatis tanpa perangkat; kode terverifikasi kompilasi lewat CI.
+
 ## Cara kerja mesin clone
 
 1. **Baca `AndroidManifest.xml` biner (AXML).** Manifest di dalam APK bukan

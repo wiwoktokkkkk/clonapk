@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kebijakan kosong: ClonApk hanya butuh status profile owner untuk memasang
+  instance kedua aplikasi ke ruang virtual, bukan mengontrol perangkat.
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies />
+</device-admin>

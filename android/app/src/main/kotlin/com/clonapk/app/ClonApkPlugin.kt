@@ -77,6 +77,10 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "uninstallApp" -> result.success(uninstallApp(call))
             "isInstalled" -> result.success(isInstalled(call))
             "installApk" -> result.success(installApk(call))
+            "virtualStatus" -> onWorker(result) { virtualStatus() }
+            "provisionProfile" -> result.success(provisionProfile())
+            "cloneVirtual" -> onWorker(result) { cloneVirtual(call) }
+            "launchVirtual" -> result.success(launchVirtual(call))
             "shareApk" -> result.success(shareApk(call))
             "deleteApk" -> result.success(deleteApk(call))
             "revealApk" -> result.success(revealApk(call))
@@ -200,7 +204,13 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun recordHistory(original: String, newPkg: String, label: String, out: File) {
+    private fun recordHistory(
+        original: String,
+        newPkg: String,
+        label: String,
+        out: File,
+        type: String = "apk"
+    ) {
         val rec = org.json.JSONObject()
         rec.put("originalPackage", original)
         rec.put("newPackage", newPkg)
@@ -208,6 +218,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         rec.put("fileName", out.name)
         rec.put("path", out.absolutePath)
         rec.put("at", System.currentTimeMillis())
+        rec.put("type", type)
         val fresh = org.json.JSONArray()
         fresh.put(rec)
         val old = readHistoryArray()
@@ -254,7 +265,12 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     "label" to o.optString("label", ""),
                     "originalPackage" to o.optString("originalPackage", ""),
                     "newPackage" to pkg,
-                    "installed" to isPkgInstalled(pkg)
+                    "type" to o.optString("type", "apk"),
+                    "installed" to
+                            if (o.optString("type", "apk") == "virtual")
+                                virtualInstalled(pkg)
+                            else
+                                isPkgInstalled(pkg)
                 )
             )
         }
@@ -279,6 +295,23 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun isPkgInstalled(pkg: String): Boolean = try {
         context.packageManager.getPackageInfo(pkg, 0)
         true
+    } catch (t: Throwable) {
+        false
+    }
+
+    /** Instance virtual dianggap terpasang bila profil terkelola memuat activity-nya. */
+    private fun virtualInstalled(pkg: String): Boolean = try {
+        val um = context.getSystemService(Context.USER_SERVICE) as android.os.UserManager
+        val user = um.userProfiles.firstOrNull {
+            it != android.os.Process.myUserHandle()
+        }
+        if (user == null) {
+            false
+        } else {
+            val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE)
+                    as android.content.pm.LauncherApps
+            !(la.getActivityList(pkg, user)?.isEmpty() ?: false)
+        }
     } catch (t: Throwable) {
         false
     }
@@ -457,6 +490,90 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         } catch (t: Throwable) {
             // Kunci tetap dibuat di memori supaya sesi ini masih bisa dipakai.
             ApkSigner.generateKey("ClonApk")
+        }
+    }
+
+    // ------------------------------------------------------------ ruang virtual
+
+    private fun deviceAdminComponent() =
+            android.content.ComponentName(context, ClonApkDeviceAdmin::class.java)
+
+    /** Status ruang virtual: apakah ClonApk profile owner + ada profil terkelola. */
+    private fun virtualStatus(): Any {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
+                as android.app.admin.DevicePolicyManager
+        val um = context.getSystemService(Context.USER_SERVICE) as android.os.UserManager
+        val managed = um.userProfiles.firstOrNull {
+            it != android.os.Process.myUserHandle()
+        }
+        return mapOf(
+            "profileOwner" to dpm.isProfileOwner(deviceAdminComponent()),
+            "hasProfile" to (managed != null)
+        )
+    }
+
+    /**
+     * Buka layar penyediaan profil kerja milik sistem. Persetujuan dilakukan
+     * pengguna lewat dialog sistem; setelah itu ClonApk menjadi profile owner.
+     */
+    private fun provisionProfile(): Boolean {
+        val intent = android.content.Intent(
+                android.app.admin.DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
+        intent.putExtra(
+                android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                deviceAdminComponent())
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Pasang instance kedua sebuah aplikasi ke ruang virtual: package SAMA,
+     * tanpa memodifikasi atau memasang ulang APK apa pun.
+     */
+    private fun cloneVirtual(call: MethodCall): Any {
+        val pkg = call.argument<String>("package") ?: error("package wajib diisi")
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
+                as android.app.admin.DevicePolicyManager
+        if (!dpm.isProfileOwner(deviceAdminComponent())) {
+            error("Ruang virtual belum aktif. Aktifkan dulu dari beranda.")
+        }
+        // Signature API ini berbeda antar versi Android; terima Boolean/Int.
+        val res: Any? = dpm.installExistingPackage(deviceAdminComponent(), pkg)
+        val ok = when (res) {
+            is Boolean -> res
+            is Int -> res == 1
+            else -> true
+        }
+        if (!ok) {
+            error("Sistem menolak memasang $pkg ke ruang virtual.")
+        }
+        recordHistory(pkg, "$pkg.virtual", "", java.io.File(""), "virtual")
+        return mapOf("newPackage" to pkg, "type" to "virtual")
+    }
+
+    /** Jalankan aplikasi di dalam ruang virtual lewat LauncherApps. */
+    private fun launchVirtual(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        val um = context.getSystemService(Context.USER_SERVICE) as android.os.UserManager
+        val user = um.userProfiles.firstOrNull {
+            it != android.os.Process.myUserHandle()
+        } ?: return false
+        val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE)
+                as android.content.pm.LauncherApps
+        return try {
+            val acts = la.getActivityList(pkg, user)
+            if (acts.isNullOrEmpty()) {
+                return false
+            }
+            la.startMainActivity(acts[0].componentName, user, null, null)
+            true
+        } catch (t: Throwable) {
+            false
         }
     }
 

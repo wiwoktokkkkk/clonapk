@@ -79,6 +79,7 @@ class HistoryItem {
     this.originalPackage = '',
     this.newPackage = '',
     this.installed = false,
+    this.type = 'apk',
   });
 
   factory HistoryItem.fromMap(Map<dynamic, dynamic> m) => HistoryItem(
@@ -90,6 +91,7 @@ class HistoryItem {
         originalPackage: (m['originalPackage'] ?? '') as String,
         newPackage: (m['newPackage'] ?? '') as String,
         installed: (m['installed'] ?? false) as bool,
+        type: (m['type'] ?? 'apk') as String,
       );
 
   final String path;
@@ -100,6 +102,11 @@ class HistoryItem {
   final String originalPackage;
   final String newPackage;
   final bool installed;
+
+  /// 'apk' (clone package baru) atau 'virtual' (package sama di ruang virtual).
+  final String type;
+
+  bool get isVirtual => type == 'virtual';
 
   DateTime get modified => DateTime.fromMillisecondsSinceEpoch(modifiedAt);
 }
