@@ -499,16 +499,36 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun deviceAdminComponent() =
             android.content.ComponentName(context, ClonApkDeviceAdmin::class.java)
 
-    /** Status ruang virtual: apakah ClonApk profile owner + ada profil terkelola. */
-    private fun virtualStatus(): Any {
+    /**
+     * Cek status profile owner secara aman: isProfileOwner tidak lagi ada di
+     * stub SDK API 36 (jadi API sistem), jadi dipanggil lewat refleksi dan
+     * cadangannya isAdminActive yang tetap publik.
+     */
+    private fun isProfileOwnerSafe(): Boolean {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
                 as android.app.admin.DevicePolicyManager
+        val comp = deviceAdminComponent()
+        return try {
+            val m = dpm.javaClass.getMethod(
+                    "isProfileOwner", android.content.ComponentName::class.java)
+            m.invoke(dpm, comp) == true
+        } catch (t: Throwable) {
+            try {
+                dpm.isAdminActive(comp)
+            } catch (t2: Throwable) {
+                false
+            }
+        }
+    }
+
+    /** Status ruang virtual: apakah ClonApk profile owner + ada profil terkelola. */
+    private fun virtualStatus(): Any {
         val um = context.getSystemService(Context.USER_SERVICE) as android.os.UserManager
         val managed = um.userProfiles.firstOrNull {
             it != android.os.Process.myUserHandle()
         }
         return mapOf(
-            "profileOwner" to dpm.isProfileOwner(deviceAdminComponent()),
+            "profileOwner" to isProfileOwnerSafe(),
             "hasProfile" to (managed != null)
         )
     }
@@ -538,11 +558,11 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     private fun cloneVirtual(call: MethodCall): Any {
         val pkg = call.argument<String>("package") ?: error("package wajib diisi")
-        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
-                as android.app.admin.DevicePolicyManager
-        if (!dpm.isProfileOwner(deviceAdminComponent())) {
+        if (!isProfileOwnerSafe()) {
             error("Ruang virtual belum aktif. Aktifkan dulu dari beranda.")
         }
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
+                as android.app.admin.DevicePolicyManager
         // Signature API ini berbeda antar versi Android; terima Boolean/Int.
         val res: Any? = dpm.installExistingPackage(deviceAdminComponent(), pkg)
         val ok = when (res) {
