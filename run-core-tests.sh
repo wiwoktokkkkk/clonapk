@@ -9,6 +9,10 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 LIB="$ROOT/tools/lib"
 BCVER="1.81"
 APKSIG="apksig-8.11.1"
+
+# Folder jar wajib ada dulu: pada clone baru ia kosong (isinya di-gitignore).
+mkdir -p "$LIB"
+
 if [ ! -f "$LIB/$APKSIG.jar" ]; then
   echo "Mengunduh $APKSIG.jar ..."
   curl -fsSL -o "$LIB/$APKSIG.jar" \
@@ -16,7 +20,6 @@ if [ ! -f "$LIB/$APKSIG.jar" ]; then
 fi
 CP="$LIB/bcprov-jdk18on-$BCVER.jar:$LIB/bcpkix-jdk18on-$BCVER.jar:$LIB/bcutil-jdk18on-$BCVER.jar:$LIB/$APKSIG.jar"
 
-mkdir -p "$LIB"
 for a in bcprov bcpkix bcutil; do
   jar="$LIB/$a-jdk18on-$BCVER.jar"
   if [ ! -f "$jar" ]; then
