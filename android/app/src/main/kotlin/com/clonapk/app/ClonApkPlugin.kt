@@ -294,9 +294,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     "originalPackage" to o.optString("originalPackage", ""),
                     "newPackage" to pkg,
                     "type" to o.optString("type", "apk"),
-                    "extraPaths" to o.optJSONArray("extraPaths")?.let { arr ->
-                        (0 until arr.length()).map { arr.getString(it) }
-                    } ?: emptyList<String>(),
+                    "extraPaths" to extrasOf(o),
                     "installed" to
                             if (o.optString("type", "apk") == "virtual")
                                 virtualInstalled(pkg)
@@ -328,6 +326,15 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         true
     } catch (t: Throwable) {
         false
+    }
+
+    private fun extrasOf(o: org.json.JSONObject): List<String> {
+        val arr = o.optJSONArray("extraPaths") ?: return emptyList()
+        val out = ArrayList<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            out.add(arr.getString(i))
+        }
+        return out
     }
 
     /** Instance virtual dianggap terpasang bila profil terkelola memuat activity-nya. */
