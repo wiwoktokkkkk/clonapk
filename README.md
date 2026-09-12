@@ -4,10 +4,14 @@ Pembuat salinan (clone) aplikasi Android dengan antarmuka bergaya iOS.
 
 ## ⬇️ Unduh APK (publik)
 
-**[ClonApk-v1.0.0.apk](https://github.com/wiwoktokkkkk/clonapk/releases/download/v1.0.0/ClonApk-v1.0.0.apk)**
-— build release, tanpa perlu akun GitHub.
+**[ClonApk.apk](https://github.com/wiwoktokkkkk/clonapk/releases/latest/download/ClonApk.apk)**
+— build release terbaru, tanpa perlu akun GitHub.
 
 Halaman rilis: https://github.com/wiwoktokkkkk/clonapk/releases
+
+Cara pakai: ketuk **Clone** pada aplikasi mana pun — package baru dibuat
+otomatis dan installer terbuka sendiri. Clone memakai nama & ikon yang sama
+dengan aplikasi aslinya, dan bisa dibuka dari seksi **Clone kamu**.
 
 ClonApk mengambil sebuah APK, mengganti identitasnya (applicationId, otoritas
 provider, permission kustom, referensi kelas) sehingga salinannya bisa dipasang
