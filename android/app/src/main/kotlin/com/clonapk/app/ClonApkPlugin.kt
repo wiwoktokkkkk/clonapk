@@ -310,7 +310,8 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         } else {
             val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE)
                     as android.content.pm.LauncherApps
-            !(la.getActivityList(pkg, user)?.isEmpty() ?: false)
+            val acts = la.getActivityList(pkg, user)
+            !acts.isNullOrEmpty()
         }
     } catch (t: Throwable) {
         false
