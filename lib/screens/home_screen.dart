@@ -1,14 +1,15 @@
-import 'dart:async';
-
 import 'package:flutter/cupertino.dart';
 
 import '../models/app_info.dart';
+import '../models/clone_result.dart';
 import '../services/clone_service.dart';
 import '../widgets/ios_widgets.dart';
 import 'clone_sheet.dart';
 import 'history_screen.dart';
+import 'progress_screen.dart';
+import 'result_screen.dart';
 
-/// Layar utama: daftar aplikasi terpasang dengan pencarian dan aksi clone.
+/// Layar utama: clone satu-tap dengan identitas otomatis + daftar clone kamu.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -21,9 +22,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _searchController = TextEditingController();
 
   List<AppInfo> _apps = const [];
+  List<HistoryItem> _history = const [];
   String _query = '';
   bool _includeSystem = false;
   bool _loading = true;
+  bool _busy = false;
   String? _error;
 
   @override
@@ -47,10 +50,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
     });
     try {
-      final apps = await _service.getInstalledApps(includeSystem: _includeSystem);
+      final results = await Future.wait([
+        _service.getInstalledApps(includeSystem: _includeSystem),
+        _service.getHistory(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _apps = apps;
+        _apps = results[0] as List<AppInfo>;
+        _history = results[1] as List<HistoryItem>;
         _loading = false;
       });
     } on CloneFailure catch (e) {
@@ -71,15 +78,73 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
   }
 
-  Future<void> _cloneFromApp(AppInfo app) async {
+  /// Clone satu-tap: package dibuat otomatis, installer langsung dibuka.
+  Future<void> _oneTapClone(AppInfo app) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final pkg = await _service.nextClonePackage(app.packageName);
+      if (!mounted) return;
+      final result = await Navigator.of(context).push<CloneResult>(
+        CupertinoPageRoute<CloneResult>(
+          fullscreenDialog: true,
+          builder: (_) => ProgressScreen(
+            sourcePath: app.apkPath,
+            newPackage: pkg,
+            newLabel: app.label,
+          ),
+        ),
+      );
+      if (result != null && mounted) {
+        // Satu ketukan di installer sistem adalah satu-satunya langkah manual;
+        // Android memang mewajibkan konfirmasi pemasangan.
+        await _service.installApk(result.path);
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          CupertinoPageRoute<void>(
+            builder: (_) => ResultScreen(result: result),
+          ),
+        );
+      }
+      _load();
+    } on CloneFailure catch (e) {
+      if (mounted) {
+        showCupertinoDialog<void>(
+          context: context,
+          builder: (ctx) => CupertinoAlertDialog(
+            title: const Text('Clone gagal'),
+            content: Text(e.message),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Oke'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _manualClone(AppInfo app) async {
     await showCloneSheet(context, sourcePath: app.apkPath, initialLabel: app.label);
-    // Riwayat berubah setelah clone, tapi daftar aplikasi tidak perlu dimuat ulang.
+    _load();
   }
 
   Future<void> _cloneFromFile() async {
     final path = await _service.pickApkFile();
     if (path == null || !mounted) return;
     await showCloneSheet(context, sourcePath: path);
+    _load();
+  }
+
+  AppInfo? _originalOf(HistoryItem item) {
+    for (final a in _apps) {
+      if (a.packageName == item.originalPackage) return a;
+    }
+    return null;
   }
 
   @override
@@ -113,9 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_loading)
             const SliverFillRemaining(
               hasScrollBody: false,
-              child: Center(
-                child: CupertinoActivityIndicator(radius: 14),
-              ),
+              child: Center(child: CupertinoActivityIndicator(radius: 14)),
             )
           else if (_error != null)
             SliverFillRemaining(
@@ -123,6 +186,42 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _ErrorView(message: _error!, onRetry: _load),
             )
           else ...[
+            if (_history.isNotEmpty)
+              SliverToBoxAdapter(
+                child: IosGroup(
+                  header: 'Clone kamu',
+                  children: [
+                    for (final item in _history)
+                      IosRow(
+                        title: item.label.isNotEmpty ? item.label : item.fileName,
+                        subtitle: item.installed
+                            ? '${item.newPackage} · terpasang'
+                            : '${item.newPackage} · belum dipasang',
+                        leading: _originalOf(item) != null
+                            ? AppIconTile(app: _originalOf(item)!)
+                            : const Icon(CupertinoIcons.doc_on_doc,
+                                size: 26, color: Color(0xFF0A84FF)),
+                        trailing: item.installed
+                            ? IosPillButton(
+                                label: 'Buka',
+                                icon: CupertinoIcons.play_circle,
+                                onPressed: () => _service.launchApp(item.newPackage),
+                              )
+                            : IosPillButton(
+                                label: 'Pasang',
+                                icon: CupertinoIcons.arrow_down_circle,
+                                onPressed: () async {
+                                  await _service.installApk(item.path);
+                                  _load();
+                                },
+                              ),
+                        dense: true,
+                      ),
+                  ],
+                  footer: 'Clone memakai nama & ikon yang sama dengan aplikasi '
+                      'aslinya dan berjalan sebagai aplikasi terpisah.',
+                ),
+              ),
             SliverToBoxAdapter(
               child: IosGroup(
                 header: 'Sumber clone',
@@ -147,9 +246,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ],
-                footer: 'Clone membuat salinan APK dengan applicationId baru sehingga '
-                    'bisa dipasang berdampingan dengan aplikasi aslinya. '
-                    'Gunakan hanya untuk aplikasi yang Anda punya haknya.',
+                footer: 'Ketuk "Clone" untuk clone satu-tap: identitas dibuat '
+                    'otomatis dan installer langsung terbuka. Ketuk baris '
+                    'aplikasi untuk pengaturan lanjutan.',
               ),
             ),
             SliverToBoxAdapter(
@@ -175,10 +274,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             trailing: IosPillButton(
                               label: 'Clone',
                               icon: CupertinoIcons.doc_on_doc,
-                              onPressed: app.apkPath.isEmpty
-                                  ? null
-                                  : () => _cloneFromApp(app),
+                              onPressed:
+                                  app.apkPath.isEmpty || _busy
+                                      ? null
+                                      : () => _oneTapClone(app),
                             ),
+                            onTap: app.apkPath.isEmpty
+                                ? null
+                                : () => _manualClone(app),
                             dense: true,
                           ),
                       ],

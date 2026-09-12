@@ -5,7 +5,6 @@ import 'package:flutter/cupertino.dart';
 import '../models/clone_result.dart';
 import '../services/clone_service.dart';
 import '../widgets/ios_widgets.dart';
-import 'result_screen.dart';
 
 /// Layar proses clone: menampilkan tahap yang sedang berjalan dan persentasenya.
 ///
@@ -63,12 +62,7 @@ class _ProgressScreenState extends State<ProgressScreen>
         deepScan: widget.deepScan,
       );
       if (!mounted) return;
-      await Navigator.of(context).pushReplacement(
-        CupertinoPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (_) => ResultScreen(result: result),
-        ),
-      );
+      Navigator.of(context).pop(result);
     } on CloneFailure catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);

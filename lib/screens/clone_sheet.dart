@@ -5,6 +5,7 @@ import '../services/clone_service.dart';
 import '../services/package_name.dart';
 import '../widgets/ios_widgets.dart';
 import 'progress_screen.dart';
+import 'result_screen.dart';
 
 /// Membuka lembar bawah untuk mengatur identitas clone lalu memulai prosesnya.
 Future<void> showCloneSheet(
@@ -131,6 +132,9 @@ class _CloneSheetState extends State<_CloneSheet> {
     setState(() => _starting = false);
     if (result != null) {
       Navigator.of(context).pop(); // tutup lembar pengaturan
+      await Navigator.of(context).push(
+        CupertinoPageRoute<void>(builder: (_) => ResultScreen(result: result)),
+      );
     }
   }
 

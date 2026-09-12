@@ -72,6 +72,10 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "inspectApk" -> onWorker(result) { inspectApk(call) }
             "clone" -> onWorker(result) { clone(call) }
             "getHistory" -> onWorker(result) { listHistory() }
+            "nextClonePackage" -> onWorker(result) { nextClonePackage(call) }
+            "launchApp" -> result.success(launchApp(call))
+            "uninstallApp" -> result.success(uninstallApp(call))
+            "isInstalled" -> result.success(isInstalled(call))
             "installApk" -> result.success(installApk(call))
             "shareApk" -> result.success(shareApk(call))
             "deleteApk" -> result.success(deleteApk(call))
@@ -167,6 +171,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
 
         val out = res.outputFile
+        recordHistory(res.originalPackage, res.newPackage, newLabel ?: "", out)
         return mapOf(
             "path" to out.absolutePath,
             "fileName" to out.name,
@@ -179,17 +184,134 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     // ---------------------------------------------------------------- utilitas
 
+    /**
+     * Riwayat clone disimpan sebagai JSON kecil di samping folder keluaran,
+     * supaya pasangan "asli -> clone" tetap known tanpa menebak-nebak nama.
+     */
+    private fun historyFile(): File = File(exportDir(), "history.json")
+
+    private fun readHistoryArray(): org.json.JSONArray {
+        val f = historyFile()
+        if (!f.isFile) return org.json.JSONArray()
+        return try {
+            org.json.JSONArray(f.readText())
+        } catch (t: Throwable) {
+            org.json.JSONArray()
+        }
+    }
+
+    private fun recordHistory(original: String, newPkg: String, label: String, out: File) {
+        val rec = org.json.JSONObject()
+        rec.put("originalPackage", original)
+        rec.put("newPackage", newPkg)
+        rec.put("label", label)
+        rec.put("fileName", out.name)
+        rec.put("path", out.absolutePath)
+        rec.put("at", System.currentTimeMillis())
+        val fresh = org.json.JSONArray()
+        fresh.put(rec)
+        val old = readHistoryArray()
+        for (i in 0 until old.length()) {
+            val o = old.getJSONObject(i)
+            if (o.optString("newPackage") != newPkg) fresh.put(o)
+        }
+        try {
+            historyFile().writeText(fresh.toString())
+        } catch (t: Throwable) {
+            // riwayat bersifat pelengkap; kegagalan menulis tidak menggagalkan clone
+        }
+    }
+
+    private fun removeFromHistory(path: String) {
+        val old = readHistoryArray()
+        val kept = org.json.JSONArray()
+        for (i in 0 until old.length()) {
+            val o = old.getJSONObject(i)
+            if (o.optString("path") != path) kept.put(o)
+        }
+        try {
+            historyFile().writeText(kept.toString())
+        } catch (t: Throwable) {
+        }
+    }
+
     private fun listHistory(): Any {
-        val dir = exportDir()
-        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".apk") } ?: return emptyList<Any>()
-        return files.sortedByDescending { it.lastModified() }.map {
-            mapOf(
-                "path" to it.absolutePath,
-                "fileName" to it.name,
-                "sizeBytes" to it.length(),
-                "modifiedAt" to it.lastModified()
+        val arr = readHistoryArray()
+        val pm = context.packageManager
+        val outList = ArrayList<Map<String, Any?>>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val path = o.optString("path", "")
+            val f = File(path)
+            if (!f.isFile) continue
+            val pkg = o.optString("newPackage", "")
+            outList.add(
+                mapOf(
+                    "path" to path,
+                    "fileName" to o.optString("fileName", f.name),
+                    "sizeBytes" to f.length(),
+                    "modifiedAt" to o.optLong("at", f.lastModified()),
+                    "label" to o.optString("label", ""),
+                    "originalPackage" to o.optString("originalPackage", ""),
+                    "newPackage" to pkg,
+                    "installed" to isPkgInstalled(pkg)
+                )
             )
         }
+        return outList
+    }
+
+    /**
+     * Usulkan package clone berikutnya yang belum terpasang:
+     * com.foo.bar -> com.foo.bar.clone -> com.foo.bar.clone2 -> ...
+     * Pengguna tidak perlu mengetik apa pun; identitas dibuat otomatis.
+     */
+    private fun nextClonePackage(call: MethodCall): Any {
+        val base = call.argument<String>("original") ?: error("original wajib diisi")
+        var i = 1
+        while (true) {
+            val candidate = if (i == 1) "$base.clone" else "$base.clone$i"
+            if (!isPkgInstalled(candidate)) return candidate
+            i++
+        }
+    }
+
+    private fun isPkgInstalled(pkg: String): Boolean = try {
+        context.packageManager.getPackageInfo(pkg, 0)
+        true
+    } catch (t: Throwable) {
+        false
+    }
+
+    /** Buka aplikasi (clone) yang sudah terpasang, seperti membuka app biasa. */
+    private fun launchApp(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: return false
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /** Minta sistem mencopot pemasangan aplikasi clone. */
+    private fun uninstallApp(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    private fun isInstalled(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        return isPkgInstalled(pkg)
     }
 
     private fun installApk(call: MethodCall): Boolean {
@@ -220,7 +342,9 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun deleteApk(call: MethodCall): Boolean {
         val f = fileFrom(call)
-        return f.delete()
+        val ok = f.delete()
+        if (ok) removeFromHistory(f.absolutePath)
+        return ok
     }
 
     private fun revealApk(call: MethodCall): Boolean {

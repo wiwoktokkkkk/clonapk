@@ -19,6 +19,15 @@ class _ResultScreenState extends State<ResultScreen> {
   bool _busy = false;
   String? _error;
   bool _deleted = false;
+  bool _installed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _service.isInstalled(widget.result.newPackage).then((v) {
+      if (mounted) setState(() => _installed = v);
+    });
+  }
 
   Future<void> _guard(Future<void> Function() action) async {
     if (_busy) return;
@@ -159,6 +168,25 @@ class _ResultScreenState extends State<ResultScreen> {
                 IosGroup(
                   header: 'Aksi',
                   children: [
+                    if (_installed && widget.result.newPackage != '-')
+                      IosRow(
+                        title: 'Buka clone',
+                        subtitle: 'Jalankan salinan seperti aplikasi biasa',
+                        leading: const _Icon(CupertinoIcons.play_circle,
+                            color: Color(0xFF34C759)),
+                        trailing: const Icon(CupertinoIcons.chevron_right,
+                            size: 15, color: CupertinoColors.systemGrey3),
+                        onTap: _busy
+                            ? null
+                            : () => _guard(() async {
+                                  final ok = await _service
+                                      .launchApp(widget.result.newPackage);
+                                  if (!ok && mounted) {
+                                    setState(() => _error =
+                                        'Clone belum bisa dibuka. Pastikan sudah terpasang.');
+                                  }
+                                }),
+                      ),
                     IosRow(
                       title: 'Pasang sekarang',
                       subtitle: 'Buka pemasang Android',

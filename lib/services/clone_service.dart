@@ -131,6 +131,53 @@ class CloneService {
     }
   }
 
+  /// Package clone otomatis berikutnya yang belum terpasang
+  /// (mis. com.foo.bar -> com.foo.bar.clone -> com.foo.bar.clone2).
+  Future<String> nextClonePackage(String original) async {
+    try {
+      final p = await _channel
+          .invokeMethod<String>('nextClonePackage', {'original': original});
+      if (p == null || p.isEmpty) {
+        throw const CloneFailure('Gagal membuat nama package otomatis.');
+      }
+      return p;
+    } on PlatformException catch (e) {
+      throw CloneFailure(e.message ?? 'Gagal membuat nama package otomatis.');
+    }
+  }
+
+  /// Buka aplikasi yang sudah terpasang (dipakai untuk membuka clone).
+  Future<bool> launchApp(String packageName) async {
+    try {
+      return await _channel
+              .invokeMethod<bool>('launchApp', {'package': packageName}) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Minta sistem mencopot pemasangan aplikasi.
+  Future<bool> uninstallApp(String packageName) async {
+    try {
+      return await _channel
+              .invokeMethod<bool>('uninstallApp', {'package': packageName}) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<bool> isInstalled(String packageName) async {
+    try {
+      return await _channel
+              .invokeMethod<bool>('isInstalled', {'package': packageName}) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   Future<String> exportDir() async {
     try {
       final p = await _channel.invokeMethod<String>('exportDir');

@@ -75,6 +75,10 @@ class HistoryItem {
     required this.fileName,
     required this.sizeBytes,
     required this.modifiedAt,
+    this.label = '',
+    this.originalPackage = '',
+    this.newPackage = '',
+    this.installed = false,
   });
 
   factory HistoryItem.fromMap(Map<dynamic, dynamic> m) => HistoryItem(
@@ -82,12 +86,20 @@ class HistoryItem {
         fileName: (m['fileName'] ?? '') as String,
         sizeBytes: (m['sizeBytes'] ?? 0) as int,
         modifiedAt: (m['modifiedAt'] ?? 0) as int,
+        label: (m['label'] ?? '') as String,
+        originalPackage: (m['originalPackage'] ?? '') as String,
+        newPackage: (m['newPackage'] ?? '') as String,
+        installed: (m['installed'] ?? false) as bool,
       );
 
   final String path;
   final String fileName;
   final int sizeBytes;
   final int modifiedAt;
+  final String label;
+  final String originalPackage;
+  final String newPackage;
+  final bool installed;
 
   DateTime get modified => DateTime.fromMillisecondsSinceEpoch(modifiedAt);
 }
