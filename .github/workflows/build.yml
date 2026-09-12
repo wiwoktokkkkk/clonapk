@@ -1,0 +1,97 @@
+# Build APK otomatis lewat GitHub Actions — tidak butuh komputer/HP sendiri.
+#
+# Setiap `git push` ke main (atau tag v*) akan:
+#   1. menjalankan uji mesin clone (JVM, 93 pemeriksaan),
+#   2. menganalisis kode Dart (flutter analyze),
+#   3. membangun APK debug + release,
+#   4. mengunggah APK sebagai artifact yang bisa diunduh dari halaman Actions.
+#
+# Catatan privasi: repo privat mendapat jatah menit Actions terbatas
+# (lihat Settings -> Billing). Kalau mau build tanpa menyentuh jatah itu,
+# buat repo menjadi public.
+
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch: # tombol "Run workflow" manual di tab Actions
+
+# Kalau ada push beruntun, batalkan build lama yang masih jalan.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------- uji inti
+  core-tests:
+    name: Uji mesin clone (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Jalankan run-core-tests.sh
+        run: ./run-core-tests.sh
+
+  # ------------------------------------------------------------ build flutter
+  build:
+    name: Flutter analyze + build APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Ambil dependensi Dart
+        run: flutter pub get
+
+      - name: Analisis kode Dart
+        run: flutter analyze
+
+      # Gradle di-cache supaya build berikutnya jauh lebih cepat.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Build APK debug
+        run: flutter build apk --debug
+
+      - name: Build APK release
+        run: flutter build apk --release
+
+      # Artifact muncul di halaman Actions -> run terpilih -> bagian Artifacts.
+      # Masa simpan 30 hari (bisa diubah di pengaturan repo).
+      - name: Unggah APK debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
+
+      - name: Unggah APK release
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
