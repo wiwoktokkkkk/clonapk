@@ -34,22 +34,22 @@ seperti aplikasi iOS di atas Android.
 - Hasil bisa dipasang, dibagikan, atau dihapus; riwayat clone tersimpan.
 - Mode gelap/terang mengikuti sistem.
 
-## 🕶️ Ruang Virtual (baru di v1.2)
+## 🕶️ Ruang Virtual (utama sejak v1.4)
 
-Clone dengan **package yang sama persis** — tanpa modifikasi APK dan tanpa
-install ulang — lewat **profil kerja Android** (managed profile):
+Ruang virtual adalah **cara utama** clone di ClonApk: aplikasi yang sudah
+terpasang dipakai ulang apa adanya — **tidak ada APK yang disalin atau
+diunduh ulang, hanya datanya yang dipisah** (hemat penyimpanan, seperti HP
+kedua di dalam HP).
 
 1. Ketuk **Aktifkan** pada kelompok "Ruang virtual" → setujui layar
    "Siapkan profil kerja" milik sistem (satu kali saja).
-2. Ketuk **Clone** pada aplikasi mana pun → instance kedua langsung terbuka
-   dengan nama & ikon yang sama, tanpa package `.clone`.
+2. Ketuk **Clone** → instance kedua langsung terbuka; tombolnya berubah
+   menjadi **Buka** untuk clone yang sudah ada.
 
-- Tidak ada bentrokan package, tidak ada repackaging/re-signing — APK asli
-  dipakai apa adanya.
-- Batas Android: satu profil kerja per perangkat; sebagian aplikasi dengan
-  proteksi ketat bisa menolak berjalan di dalamnya.
-- Kalau ruang virtual tidak tersedia di perangkatmu, **mode APK** (package
-  otomatis + installer sistem) selalu tersedia sebagai cadangan.
+- Tidak ada bentrokan package, tidak ada repackaging/re-signing.
+- Mode APK (menyalin berkas dengan package otomatis) tetap tersedia sebagai
+  **cadangan** — ditawarkan otomatis saat ruang virtual belum aktif atau
+  ditolak perangkat.
 
 > Proses persetujuan profil kerja berbeda-beda antar merek ponsel dan tidak
 > bisa diuji otomatis tanpa perangkat; kode terverifikasi kompilasi lewat CI.

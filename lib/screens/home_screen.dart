@@ -17,7 +17,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _service = CloneService.instance;
   final _searchController = TextEditingController();
 
@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _searchController.addListener(() {
       setState(() => _query = _searchController.text.trim().toLowerCase());
     });
@@ -45,8 +46,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Kembali dari layar persetujuan profil kerja → segarkan status.
+    if (state == AppLifecycleState.resumed) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -112,6 +122,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Package yang sudah punya instance di ruang virtual (dari riwayat).
+  Set<String> get _virtualCloned => _history
+      .where((h) => h.isVirtual)
+      .map((h) => h.originalPackage)
+      .toSet();
+
   List<AppInfo> get _filtered {
     if (_query.isEmpty) return _apps;
     return _apps
@@ -121,31 +137,83 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
   }
 
-  /// Clone satu-tap. Mode ruang virtual: package sama, tanpa install ulang,
-  /// aplikasi langsung terbuka. Mode APK: package otomatis + installer sistem.
-  Future<void> _oneTapClone(AppInfo app) async {
+  /// Tombol Clone: utamakan ruang virtual (tanpa menyalin APK — hanya data
+  /// yang dipisah). Kalau belum aktif, tawarkan mengaktifkan atau mode APK.
+  Future<void> _cloneSmart(AppInfo app) async {
     if (_busy) return;
     if (_useVirtual && _profileOwner) {
-      setState(() => _busy = true);
-      try {
-        await _service.cloneVirtual(app.packageName);
-        final opened = await _service.launchVirtual(app.packageName);
-        if (!mounted) return;
-        if (!opened) {
-          await _dialog('Clone dibuat',
-              'Instance kedua ${app.label} sudah ada di ruang virtual, tapi '
-                  'belum bisa dibuka langsung. Coba lagi sebentar atau buka '
-                  'dari seksi "Clone kamu".');
-        }
-        _load();
-      } on CloneFailure catch (e) {
-        if (!mounted) return;
-        await _dialog('Ruang virtual gagal', e.message);
-      } finally {
-        if (mounted) setState(() => _busy = false);
+      await _virtualClone(app);
+      return;
+    }
+    if (!_profileOwner) {
+      final choice = await showCupertinoModalPopup<String>(
+        context: context,
+        builder: (ctx) => CupertinoActionSheet(
+          title: Text('Clone ${app.label}'),
+          message: const Text('Ruang virtual tidak menyalin APK — hanya datanya '
+              'yang dipisah, seperti HP kedua di dalam HP. Mode APK menyalin '
+              'aplikasi dengan package baru.'),
+          actions: [
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.of(ctx).pop('virtual'),
+              child: const Text('Aktifkan ruang virtual (disarankan)'),
+            ),
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.of(ctx).pop('apk'),
+              child: const Text('Clone sebagai APK (cadangan)'),
+            ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Batal'),
+          ),
+        ),
+      );
+      if (!mounted) return;
+      if (choice == 'virtual') {
+        await _provisionVirtual();
+      } else if (choice == 'apk') {
+        await _apkClone(app);
       }
       return;
     }
+    await _apkClone(app);
+  }
+
+  /// Clone virtual: sudah ada → langsung buka; belum → buat lalu buka.
+  Future<void> _virtualClone(AppInfo app) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final has = await _service.virtualHas(app.packageName);
+      if (!has) {
+        await _service.cloneVirtual(app.packageName);
+      }
+      final opened = await _service.launchVirtual(app.packageName);
+      if (!mounted) return;
+      if (!opened) {
+        await _dialog('Sudah ada di ruang virtual',
+            '${app.label} ada di ruang virtual tapi belum bisa dibuka otomatis. '
+            'Cari ikonnya di bagian "Kerja" pada layar utama, atau buka dari '
+            'seksi "Clone kamu".');
+      }
+      _load();
+    } on CloneFailure catch (e) {
+      if (!mounted) return;
+      await _dialog('Ruang virtual gagal', e.message);
+    } catch (e) {
+      // Jangan biarkan satu kegagalan OEM membuat aplikasi tumbang.
+      if (!mounted) return;
+      await _dialog('Ruang virtual gagal', '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Mode cadangan: salin APK dengan package otomatis + installer sistem.
+  Future<void> _apkClone(AppInfo app) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       final pkg = await _service.nextClonePackage(app.packageName);
@@ -255,6 +323,47 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _ErrorView(message: _error!, onRetry: _load),
             )
           else ...[
+            SliverToBoxAdapter(
+              child: IosGroup(
+                header: 'Ruang virtual',
+                children: [
+                  IosRow(
+                    title: 'Status ruang virtual',
+                    subtitle: _profileOwner
+                        ? 'Aktif — clone tidak menyalin APK, hanya data dipisah'
+                        : _hasProfile
+                            ? 'HP sudah punya profil kerja lain — hapus dulu '
+                                'atau pakai mode APK'
+                            : 'Belum aktif — ketuk "Aktifkan" (sekali saja)',
+                    leading: const _LeadingIcon(CupertinoIcons.time_solid),
+                    trailing: !_profileOwner
+                        ? IosPillButton(
+                            label: 'Aktifkan',
+                            icon: CupertinoIcons.sparkles,
+                            onPressed: _provisionVirtual,
+                          )
+                        : const Icon(CupertinoIcons.checkmark_alt_circle,
+                            size: 22, color: Color(0xFF34C759)),
+                  ),
+                  if (_profileOwner)
+                    IosRow(
+                      title: 'Clone lewat ruang virtual',
+                      subtitle: 'Tanpa salin APK — langsung buka',
+                      trailing: CupertinoSwitch(
+                        value: _useVirtual,
+                        onChanged: (v) => setState(() => _useVirtual = v),
+                      ),
+                    ),
+                ],
+                footer: 'Clone di ruang virtual tidak mengunduh atau menyalin '
+                    'APK — aplikasi yang sudah terpasang dipakai ulang dan '
+                    'hanya datanya yang dipisah (hemat penyimpanan, seperti '
+                    'HP kedua di dalam HP). Perlu sekali persetujuan sistem '
+                    '"profil kerja". Android membatasi satu profil kerja per '
+                    'perangkat; sebagian aplikasi proteksi ketat bisa menolak '
+                    'berjalan di dalamnya — untuk itu pakai mode APK.',
+              ),
+            ),
             if (_history.isNotEmpty)
               SliverToBoxAdapter(
                 child: IosGroup(
@@ -306,44 +415,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             SliverToBoxAdapter(
               child: IosGroup(
-                header: 'Ruang virtual',
-                children: [
-                  IosRow(
-                    title: 'Status ruang virtual',
-                    subtitle: _profileOwner
-                        ? 'Aktif — clone memakai package yang sama'
-                        : _hasProfile
-                            ? 'Profil ada, tapi belum siap'
-                            : 'Belum aktif — ketuk "Aktifkan"',
-                    leading: const _LeadingIcon(CupertinoIcons.time_solid),
-                    trailing: !_profileOwner
-                        ? IosPillButton(
-                            label: 'Aktifkan',
-                            icon: CupertinoIcons.sparkles,
-                            onPressed: _provisionVirtual,
-                          )
-                        : const Icon(CupertinoIcons.checkmark_alt_circle,
-                            size: 22, color: Color(0xFF34C759)),
-                  ),
-                  if (_profileOwner)
-                    IosRow(
-                      title: 'Clone lewat ruang virtual',
-                      subtitle: 'Package sama, tanpa install ulang, langsung buka',
-                      trailing: CupertinoSwitch(
-                        value: _useVirtual,
-                        onChanged: (v) => setState(() => _useVirtual = v),
-                      ),
-                    ),
-                ],
-                footer: 'Ruang virtual memakai profil kerja resmi Android: '
-                    'sekali persetujuan sistem, setelah itu clone berjalan '
-                    'dengan package & ikon yang sama persis. Android membatasi '
-                    'satu profil kerja per perangkat; sebagian aplikasi dengan '
-                    'proteksi ketat mungkin menolak berjalan di dalamnya.',
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: IosGroup(
                 header: 'Sumber clone',
                 children: [
                   IosRow(
@@ -392,12 +463,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 '${app.packageName} · ${app.versionName} · ${formatBytes(app.sizeBytes)}',
                             leading: AppIconTile(app: app),
                             trailing: IosPillButton(
-                              label: 'Clone',
-                              icon: CupertinoIcons.doc_on_doc,
+                              label: _virtualCloned.contains(app.packageName)
+                                  ? 'Buka'
+                                  : 'Clone',
+                              icon: _virtualCloned.contains(app.packageName)
+                                  ? CupertinoIcons.play_circle
+                                  : CupertinoIcons.doc_on_doc,
                               onPressed:
                                   app.apkPath.isEmpty || _busy
                                       ? null
-                                      : () => _oneTapClone(app),
+                                      : () => _cloneSmart(app),
                             ),
                             onTap: app.apkPath.isEmpty
                                 ? null

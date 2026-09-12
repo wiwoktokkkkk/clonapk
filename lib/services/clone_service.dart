@@ -243,6 +243,11 @@ class CloneService {
       .invokeMethod<bool>('launchVirtual', {'package': packageName})
       .then((v) => v ?? false);
 
+  /// Apakah aplikasi sudah punya instance di ruang virtual?
+  Future<bool> virtualHas(String packageName) => _channel
+      .invokeMethod<bool>('virtualHas', {'package': packageName})
+      .then((v) => v ?? false);
+
   /// Buka clone apa pun sesuai jenisnya.
   Future<bool> openClone(HistoryItem item) => item.isVirtual
       ? launchVirtual(item.originalPackage)

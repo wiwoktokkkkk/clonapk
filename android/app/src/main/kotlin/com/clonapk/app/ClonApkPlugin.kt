@@ -81,6 +81,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "provisionProfile" -> result.success(provisionProfile())
             "cloneVirtual" -> onWorker(result) { cloneVirtual(call) }
             "launchVirtual" -> result.success(launchVirtual(call))
+            "virtualHas" -> onWorker(result) { virtualHas(call) }
             "shareApk" -> result.success(shareApk(call))
             "deleteApk" -> result.success(deleteApk(call))
             "revealApk" -> result.success(revealApk(call))
@@ -641,6 +642,12 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (!isProfileOwnerSafe()) {
             error("Ruang virtual belum aktif. Aktifkan dulu dari beranda.")
         }
+        // Sudah ada di ruang virtual? Jangan gagal — cukup pastikan riwayat
+        // tercatat, pemanggil tinggal membukanya.
+        if (virtualInstalled(pkg)) {
+            recordHistory(pkg, "$pkg.virtual", "", java.io.File(""), "virtual")
+            return mapOf("newPackage" to pkg, "type" to "virtual")
+        }
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
                 as android.app.admin.DevicePolicyManager
         // Signature API ini berbeda antar versi Android; terima Boolean/Int.
@@ -676,6 +683,12 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         } catch (t: Throwable) {
             false
         }
+    }
+
+    /** Apakah aplikasi ini sudah punya instance di ruang virtual? */
+    private fun virtualHas(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        return virtualInstalled(pkg)
     }
 
     companion object {
