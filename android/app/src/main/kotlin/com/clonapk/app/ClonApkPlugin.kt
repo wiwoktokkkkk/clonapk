@@ -82,6 +82,10 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "cloneVirtual" -> onWorker(result) { cloneVirtual(call) }
             "launchVirtual" -> result.success(launchVirtual(call))
             "virtualHas" -> onWorker(result) { virtualHas(call) }
+            "parallelApps" -> onWorker(result) { parallelApps() }
+            "parallelInstall" -> onWorker(result) { parallelInstall(call) }
+            "parallelLaunch" -> result.success(parallelLaunch(call))
+            "parallelUninstall" -> result.success(parallelUninstall(call))
             "shareApk" -> result.success(shareApk(call))
             "deleteApk" -> result.success(deleteApk(call))
             "revealApk" -> result.success(revealApk(call))
@@ -689,6 +693,70 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun virtualHas(call: MethodCall): Boolean {
         val pkg = call.argument<String>("package") ?: return false
         return virtualInstalled(pkg)
+    }
+
+    // ------------------------------------------------------- mesin parallel
+    // Mesin virtual gaya Parallel Space (BlackBox, Apache-2.0). Eksperimental:
+    // aplikasi berjalan DI DALAM ClonApk tanpa install; kompatibilitasnya
+    // bergantung perangkat & versi Android.
+
+    private fun parallelApps(): Any {
+        val core = top.niunaijun.blackbox.BlackBoxCore.get()
+        val pm = context.packageManager
+        val out = ArrayList<Map<String, Any?>>()
+        for (pi in core.getInstalledPackages(0, 0)) {
+            val pkg = pi.packageName ?: continue
+            // Label & ikon diambil dari aplikasi asli yang terpasang; resource
+            // di dalam mesin tidak bisa dimuat PackageManager host.
+            val ai = try {
+                pm.getApplicationInfo(pkg, 0)
+            } catch (t: Throwable) {
+                null
+            }
+            out.add(
+                mapOf(
+                    "packageName" to pkg,
+                    "label" to (ai?.loadLabel(pm)?.toString() ?: pkg),
+                    "versionName" to (pi.versionName ?: "-"),
+                    "iconPath" to
+                            if (ai != null) iconPathFor(pkg, ai.loadIcon(pm)) else null
+                )
+            )
+        }
+        out.sortBy { (it["label"] as String).lowercase() }
+        return out
+    }
+
+    private fun parallelInstall(call: MethodCall): Any {
+        val pkg = call.argument<String>("package") ?: error("package wajib diisi")
+        val core = top.niunaijun.blackbox.BlackBoxCore.get()
+        if (core.isInstalled(pkg, 0)) {
+            return mapOf("packageName" to pkg, "already" to true)
+        }
+        val res = core.installPackageAsUser(pkg, 0)
+        if (!res.success) {
+            error(res.msg ?: "Mesin parallel menolak memasang $pkg.")
+        }
+        return mapOf("packageName" to pkg, "already" to false)
+    }
+
+    private fun parallelLaunch(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        return try {
+            top.niunaijun.blackbox.BlackBoxCore.get().launchApk(pkg, 0)
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    private fun parallelUninstall(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        return try {
+            top.niunaijun.blackbox.BlackBoxCore.get().uninstallPackageAsUser(pkg, 0)
+            true
+        } catch (t: Throwable) {
+            false
+        }
     }
 
     companion object {

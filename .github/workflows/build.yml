@@ -50,7 +50,13 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          # Bcore (mesin parallel) dikompilasi dengan source/target Java 21.
+          java-version: 21
+
+      - name: Pasang NDK 29 (dibutuhkan mesin parallel)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066" > /dev/null
 
       - uses: subosito/flutter-action@v2
         with:

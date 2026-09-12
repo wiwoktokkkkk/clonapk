@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 
 import '../models/app_info.dart';
@@ -34,6 +36,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _hasProfile = false;
   bool _useVirtual = false;
 
+  // Mesin parallel (BlackBox, eksperimental): aplikasi jalan di dalam ClonApk.
+  List<AppInfo> _parallelApps = const [];
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _service.getInstalledApps(includeSystem: _includeSystem),
         _service.getHistory(),
         _service.virtualStatus(),
+        _service.parallelApps().catchError((_) => <AppInfo>[]),
       ]);
       if (!mounted) return;
       setState(() {
@@ -78,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _profileOwner = vs['profileOwner'] ?? false;
         _hasProfile = vs['hasProfile'] ?? false;
         if (_profileOwner) _useVirtual = true;
+        _parallelApps = results[3] as List<AppInfo>;
         _loading = false;
       });
     } on CloneFailure catch (e) {
@@ -127,6 +134,98 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       .where((h) => h.isVirtual)
       .map((h) => h.originalPackage)
       .toSet();
+
+  /// Daftar aplikasi untuk ditambahkan ke mesin parallel.
+  Future<void> _addParallel() async {
+    final apps =
+        _apps.where((a) => a.packageName != 'com.clonapk.app').toList();
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(ctx).size.height * 0.6,
+        color: CupertinoColors.systemGroupedBackground.resolveFrom(ctx),
+        child: Column(
+          children: [
+            const SizedBox(height: 14),
+            const Text('Tambah ke mesin parallel',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final app in apps)
+                    IosRow(
+                      title: app.label,
+                      subtitle: app.packageName,
+                      leading: AppIconTile(app: app),
+                      trailing: IosPillButton(
+                        label: 'Tambah',
+                        icon: CupertinoIcons.plus_circle,
+                        onPressed: () async {
+                          Navigator.of(ctx).pop();
+                          try {
+                            await _service.parallelInstall(app.packageName);
+                            _load();
+                          } on CloneFailure catch (e) {
+                            await _dialog('Mesin parallel gagal', e.message);
+                          } catch (e) {
+                            await _dialog('Mesin parallel gagal', '$e');
+                          }
+                        },
+                      ),
+                      dense: true,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Buka aplikasi di dalam mesin parallel.
+  Future<void> _launchParallel(AppInfo app) async {
+    final ok = await _service.parallelLaunch(app.packageName);
+    if (!ok && mounted) {
+      await _dialog('Gagal membuka',
+          '${app.label} tidak bisa dijalankan di mesin parallel pada perangkat '
+          'ini. Coba Ruang Virtual (lebih andal) atau mode APK.');
+    }
+  }
+
+  /// Menu tekan-lama pada ubin mesin parallel.
+  Future<void> _parallelMenu(AppInfo app) async {
+    final choice = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (ctx) => CupertinoActionSheet(
+        title: Text(app.label),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(ctx).pop('open'),
+            child: const Text('Buka'),
+          ),
+          CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(ctx).pop('remove'),
+            child: const Text('Hapus dari mesin'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          isDefaultAction: true,
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Batal'),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'open') {
+      await _launchParallel(app);
+    } else if (choice == 'remove') {
+      await _service.parallelUninstall(app.packageName);
+      _load();
+    }
+  }
 
   List<AppInfo> get _filtered {
     if (_query.isEmpty) return _apps;
@@ -323,6 +422,78 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: _ErrorView(message: _error!, onRetry: _load),
             )
           else ...[
+            SliverToBoxAdapter(
+              child: IosGroup(
+                header: 'Mesin parallel (eksperimental)',
+                showSeparators: false,
+                children: [
+                  IosRow(
+                    title: 'Aplikasi di dalam mesin',
+                    subtitle: _parallelApps.isEmpty
+                        ? 'Berjalan di dalam ClonApk, tanpa install'
+                        : '${_parallelApps.length} aplikasi · ketuk untuk buka',
+                    leading: const _LeadingIcon(CupertinoIcons.cube_box),
+                    trailing: IosPillButton(
+                      label: 'Tambah',
+                      icon: CupertinoIcons.plus_circle,
+                      onPressed: _addParallel,
+                    ),
+                  ),
+                  if (_parallelApps.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+                      child: Wrap(
+                        spacing: 12,
+                        runSpacing: 14,
+                        children: [
+                          for (final app in _parallelApps)
+                            SizedBox(
+                              width: 68,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _launchParallel(app),
+                                onLongPress: () => _parallelMenu(app),
+                                child: Column(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(13),
+                                      child: app.iconPath != null &&
+                                              File(app.iconPath!).existsSync()
+                                          ? Image.file(File(app.iconPath!),
+                                              width: 52, height: 52)
+                                          : Container(
+                                              width: 52,
+                                              height: 52,
+                                              color: const Color(0xFFE5E5EA),
+                                              child: const Icon(
+                                                  CupertinoIcons.cube_box,
+                                                  color: Color(0xFF8E8E93)),
+                                            ),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      app.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+                footer: 'Mesin parallel = aplikasi dijalankan DI DALAM '
+                    'ClonApk tanpa install, seperti Parallel Space (memakai '
+                    'mesin open-source BlackBox, Apache-2.0). EKSPERIMENTAL: '
+                    'belum teruji perangkat; Android baru & aplikasi proteksi '
+                    'ketat sering tidak didukung — jika gagal, pakai Ruang '
+                    'Virtual atau mode APK. Tekan lama ubin untuk menghapus.',
+              ),
+            ),
             SliverToBoxAdapter(
               child: IosGroup(
                 header: 'Ruang virtual',

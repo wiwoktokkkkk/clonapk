@@ -68,4 +68,6 @@ dependencies {
     // Pustaka penandatanganan resmi (v1+v2) yang sama dengan AGP/apksigner.
     implementation("com.android.tools.build:apksig:8.11.1")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Mesin virtual gaya Parallel Space (eksperimental).
+    implementation(project(":Bcore"))
 }

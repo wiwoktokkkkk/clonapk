@@ -22,3 +22,10 @@ plugins {
 }
 
 include(":app")
+
+// Mesin virtual gaya Parallel Space (BlackBox, Apache-2.0 — lihat
+// android/LICENSE-BLACKBOX). Bcore = inti engine; black-reflection &
+// compiler = pustaka bantu refleksinya.
+include(":Bcore")
+include(":black-reflection")
+include(":compiler")

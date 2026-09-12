@@ -34,6 +34,26 @@ seperti aplikasi iOS di atas Android.
 - Hasil bisa dipasang, dibagikan, atau dihapus; riwayat clone tersimpan.
 - Mode gelap/terang mengikuti sistem.
 
+## 🧪 Mesin Parallel (baru di v1.5, eksperimental)
+
+Mode paling mirip **Parallel Space**: aplikasi dijalankan **DI DALAM
+ClonApk tanpa install sama sekali**.
+
+- Kelompok "Mesin parallel" di beranda → **Tambah** → pilih aplikasi →
+  ikonnya muncul di grid → ketuk untuk membuka.
+- Tekan lama ikon untuk menghapus dari mesin.
+- Mesinnya adalah [BlackBox](https://github.com/ALEX5402/NewBlackbox)
+  (virtual engine open-source, **Apache-2.0** — salinan lisensi di
+  `android/LICENSE-BLACKBOX`), di-vendor apa adanya sebagai modul
+  `Bcore` + `black-reflection` + `compiler`.
+
+**Peringatan jujur:** mesin hooking seperti ini bergantung API internal
+Android yang terus dikunci Google. Statusnya **eksperimental**: belum teruji
+di perangkat nyata dari lingkungan build ini, sering tidak didukung di
+Android 15/16, dan aplikasi berproteksi ketat (perbankan, sebagian fitur
+WhatsApp) bisa menolak berjalan. Kalau gagal, pakai **Ruang Virtual**
+(resmi Android) atau **mode APK**.
+
 ## 🕶️ Ruang Virtual (utama sejak v1.4)
 
 Ruang virtual adalah **cara utama** clone di ClonApk: aplikasi yang sudah

@@ -13,8 +13,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
+        android:name=".App"
         android:label="ClonApk"
-        android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true">

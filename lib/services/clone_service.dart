@@ -252,6 +252,47 @@ class CloneService {
   Future<bool> openClone(HistoryItem item) => item.isVirtual
       ? launchVirtual(item.originalPackage)
       : launchApp(item.newPackage);
+
+  // ------------------------------------------------------- mesin parallel
+
+  /// Daftar aplikasi di dalam mesin parallel (BlackBox).
+  Future<List<AppInfo>> parallelApps() async {
+    try {
+      final res = await _channel.invokeMethod<List<dynamic>>('parallelApps');
+      return (res ?? const <dynamic>[])
+          .whereType<Map<dynamic, dynamic>>()
+          .map((m) => AppInfo.fromMap({
+                'packageName': m['packageName'],
+                'label': m['label'],
+                'versionName': m['versionName'],
+                'apkPath': '',
+                'iconPath': m['iconPath'],
+              }))
+          .toList();
+    } on PlatformException catch (e) {
+      throw CloneFailure(e.message ?? 'Mesin parallel tidak tersedia.');
+    }
+  }
+
+  /// Masukkan aplikasi ke mesin parallel.
+  Future<void> parallelInstall(String packageName) async {
+    try {
+      await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('parallelInstall', {'package': packageName});
+    } on PlatformException catch (e) {
+      throw CloneFailure(e.message ?? 'Mesin parallel menolak aplikasi ini.');
+    }
+  }
+
+  /// Jalankan aplikasi di dalam mesin parallel.
+  Future<bool> parallelLaunch(String packageName) => _channel
+      .invokeMethod<bool>('parallelLaunch', {'package': packageName})
+      .then((v) => v ?? false);
+
+  /// Keluarkan aplikasi dari mesin parallel.
+  Future<bool> parallelUninstall(String packageName) => _channel
+      .invokeMethod<bool>('parallelUninstall', {'package': packageName})
+      .then((v) => v ?? false);
 }
 
 /// Kegagalan yang pesannya aman ditampilkan langsung ke pengguna.
