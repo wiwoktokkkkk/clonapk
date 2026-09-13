@@ -284,14 +284,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                           ],
-                          footer: 'Ketuk ikon = buka di dalam mesin. '
-                              'Tekan lama = menu (ikon layar utama / hapus). '
-                              '✕ = hapus instance itu saja (kalau salah '
-                              'tambah). Data tiap instance terpisah dan '
-                              'tersimpan di ClonApk — hapus cache tidak '
-                              'menghapusnya. Mesin parallel bersifat '
-                              'eksperimental: Android baru & aplikasi proteksi '
-                              'ketat bisa menolak berjalan.',
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: IosGroup(
+                          header: 'List APK',
+                          children: [
+                            if (_instances.isEmpty)
+                              const IosRow(
+                                title: 'Belum ada APK yang di-clone',
+                                subtitle:
+                                    'Hasil clone akan terdaftar di sini',
+                              )
+                            else
+                              for (final inst in _instances)
+                                IosRow(
+                                  title: inst.label,
+                                  subtitle: inst.packageName,
+                                  leading: _InstanceIcon(inst: inst),
+                                  trailing: IosPillButton(
+                                    label: 'Buka',
+                                    icon: CupertinoIcons.play_circle,
+                                    onPressed: () => _launchInst(inst),
+                                  ),
+                                  onTap: () => _menuInst(inst),
+                                  dense: true,
+                                ),
+                          ],
                         ),
                       ),
                       const SliverToBoxAdapter(child: SizedBox(height: 32)),
@@ -466,6 +485,28 @@ class _InstanceTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _InstanceIcon extends StatelessWidget {
+  const _InstanceIcon({required this.inst});
+
+  final ParallelApp inst;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(7),
+      child: inst.iconPath != null && File(inst.iconPath!).existsSync()
+          ? Image.file(File(inst.iconPath!), width: 30, height: 30)
+          : Container(
+              width: 30,
+              height: 30,
+              color: const Color(0xFFE5E5EA),
+              child: const Icon(CupertinoIcons.cube_box,
+                  size: 16, color: Color(0xFF8E8E93)),
+            ),
     );
   }
 }
