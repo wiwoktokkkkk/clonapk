@@ -741,12 +741,33 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return out
     }
 
-    /** userId bebas berikutnya untuk package ini → tiap tambahan = instance baru. */
+    /**
+     * userId bebas berikutnya untuk package ini → tiap tambahan = instance baru.
+     *
+     * PENTING: jangan pakai core.isInstalled() di sini. Saat layanan engine
+     * tidak stabil, BlackBox jatuh ke mode fallback yang mengecek
+     * PackageManager PERANGKAT — aplikasi asli selalu terpasang di sana,
+     * sehingga semua slot salah dianggap terisi ("batas 32 instance" padahal
+     * mesin kosong). Enumerasi instance nyata lewat getUsers +
+     * getInstalledPackages adalah sumber kebenaran yang aman.
+     */
     private fun nextFreeUserId(core: top.niunaijun.blackbox.BlackBoxCore, pkg: String): Int {
-        for (id in 0..31) {
-            if (!core.isInstalled(pkg, id)) return id
+        val used = HashSet<Int>()
+        try {
+            for (u in core.getUsers()) {
+                for (pi in core.getInstalledPackages(0, u.id)) {
+                    if (pi.packageName == pkg) used.add(u.id)
+                }
+            }
+        } catch (t: Throwable) {
+            // Enumerasi gagal → mulai dari 0; pemasangan yang akan menentukan.
         }
-        error("Batas 32 instance untuk $pkg tercapai.")
+        var id = 0
+        while (id < 32 && used.contains(id)) id++
+        if (id >= 32) {
+            error("Batas 32 instance untuk $pkg tercapai.")
+        }
+        return id
     }
 
     private fun parallelInstall(call: MethodCall): Any {
