@@ -303,6 +303,47 @@ class CloneService {
           .invokeMethod<bool>(
               'parallelShortcut', {'package': packageName, 'userId': userId})
           .then((v) => v ?? false);
+
+  /// Ganti nama tampilan satu instance (kosongkan = kembali otomatis).
+  Future<bool> parallelRename(String packageName,
+          {int userId = 0, required String label}) =>
+      _channel
+          .invokeMethod<bool>('parallelRename',
+              {'package': packageName, 'userId': userId, 'label': label})
+          .then((v) => v ?? false);
+
+  /// Bersihkan data satu instance (clone tetap ada, login terhapus).
+  Future<bool> parallelClearData(String packageName, {int userId = 0}) =>
+      _channel
+          .invokeMethod<bool>(
+              'parallelClearData', {'package': packageName, 'userId': userId})
+          .then((v) => v ?? false);
+
+  /// Backup data satu instance ke zip; kembalikan {path, sizeBytes}.
+  Future<Map<String, dynamic>> parallelBackup(String packageName,
+      {int userId = 0}) async {
+    try {
+      final m = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+          'parallelBackup', {'package': packageName, 'userId': userId});
+      return {
+        'path': (m?['path'] ?? '') as String,
+        'sizeBytes': (m?['sizeBytes'] ?? 0) as int,
+      };
+    } on PlatformException catch (e) {
+      throw CloneFailure(e.message ?? 'Backup gagal.');
+    }
+  }
+
+  /// Pulihkan data satu instance dari zip hasil backup.
+  Future<bool> parallelRestore(String packageName,
+          {int userId = 0, required String zipPath}) =>
+      _channel
+          .invokeMethod<bool>('parallelRestore', {
+        'package': packageName,
+        'userId': userId,
+        'zipPath': zipPath,
+      })
+          .then((v) => v ?? false);
 }
 
 /// Kegagalan yang pesannya aman ditampilkan langsung ke pengguna.

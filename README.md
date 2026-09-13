@@ -47,7 +47,16 @@ aplikasi dijalankan **DI DALAM ClonApk tanpa install sama sekali**.
 - **Ketuk ikon** di grid = buka instance itu di dalam mesin.
 - **✕ pada ikon** = hapus instance itu saja (kalau salah tambah), dengan
   konfirmasi; instance lain & aplikasi asli tidak terpengaruh.
-- **Tekan lama ikon** = menu Buka / Buat ikon di layar utama / Hapus.
+- **Kelola instance** (ketuk baris di "List APK" / tekan lama ikon):
+  - **Ganti nama** — "WhatsApp 2" bisa jadi "WA Toko", "WA Pribadi", dst.
+  - **Backup data** — data instance di-zip ke folder ClonApk/backups dan
+    bisa langsung dibagikan (simpan ke cloud!). **Restore data dari zip**
+    memulihkannya kapan pun — penyelamat kalau ClonApk terpasang ulang.
+  - **Bersihkan data** — reset login/data satu instance tanpa menghapus
+    clone-nya.
+  - **Buat ikon di layar utama** — ikon instance memakai **badge nomor**
+    (angka kecil di pojok) supaya tidak tertukar.
+- **Ukuran penyimpanan** tiap instance tampil di List APK.
 - **Ikon layar utama:** setiap instance otomatis diminta dibuatkan
   shortcut dengan nama & ikon aslinya (mis. "WhatsApp 2"), sehingga
   tampil seperti aplikasi biasa; sebagian launcher menampilkan dialog

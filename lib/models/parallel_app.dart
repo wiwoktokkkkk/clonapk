@@ -8,6 +8,7 @@ class ParallelApp {
     required this.userId,
     required this.label,
     this.iconPath,
+    this.sizeBytes = 0,
   });
 
   factory ParallelApp.fromMap(Map<dynamic, dynamic> m) => ParallelApp(
@@ -15,10 +16,12 @@ class ParallelApp {
         userId: (m['userId'] ?? 0) as int,
         label: (m['label'] ?? '') as String,
         iconPath: m['iconPath'] as String?,
+        sizeBytes: (m['sizeBytes'] ?? 0) as int,
       );
 
   final String packageName;
   final int userId;
   final String label;
   final String? iconPath;
+  final int sizeBytes;
 }

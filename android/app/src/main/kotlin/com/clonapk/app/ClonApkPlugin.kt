@@ -87,6 +87,10 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "parallelLaunch" -> result.success(parallelLaunch(call))
             "parallelUninstall" -> result.success(parallelUninstall(call))
             "parallelShortcut" -> result.success(parallelShortcut(call))
+            "parallelRename" -> onWorker(result) { parallelRename(call) }
+            "parallelClearData" -> onWorker(result) { parallelClearData(call) }
+            "parallelBackup" -> onWorker(result) { parallelBackup(call) }
+            "parallelRestore" -> onWorker(result) { parallelRestore(call) }
             "shareApk" -> result.success(shareApk(call))
             "deleteApk" -> result.success(deleteApk(call))
             "revealApk" -> result.success(revealApk(call))
@@ -716,6 +720,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // "WA 1, WA 2, ..." konsisten antar pemanggilan.
         instances.sortWith(compareBy({ it.pkg }, { it.userId }))
         val counter = HashMap<String, Int>()
+        val labels = readLabels()
         val out = ArrayList<Map<String, Any?>>()
         for (inst in instances) {
             val n = (counter[inst.pkg] ?: 0) + 1
@@ -726,19 +731,227 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 null
             }
             val baseLabel = ai?.loadLabel(pm)?.toString() ?: inst.pkg
+            val custom = labels.optString("${inst.pkg}#${inst.userId}", "")
             out.add(
                 mapOf(
                     "packageName" to inst.pkg,
                     "userId" to inst.userId,
-                    "label" to "$baseLabel $n",
+                    "label" to if (custom.isNotEmpty()) custom else "$baseLabel $n",
                     "versionName" to "-",
+                    "sizeBytes" to instanceSize(inst.pkg, inst.userId),
                     "iconPath" to
-                            if (ai != null) iconPathFor(inst.pkg, ai.loadIcon(pm)) else null
+                            if (ai != null) {
+                                badgedIconPath(inst.pkg, ai.loadIcon(pm), n)
+                            } else {
+                                null
+                            }
                 )
             )
         }
         out.sortBy { (it["label"] as String).lowercase() }
         return out
+    }
+
+    // ------------------------------------------------- label & ukuran instance
+
+    private fun labelsFile() = File(context.filesDir, "instance-labels.json")
+
+    private fun readLabels(): org.json.JSONObject = try {
+        org.json.JSONObject(labelsFile().readText())
+    } catch (t: Throwable) {
+        org.json.JSONObject()
+    }
+
+    private fun parallelRename(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        val userId = call.argument<Int>("userId") ?: 0
+        val label = (call.argument<String>("label") ?: "").trim()
+        val labels = readLabels()
+        val key = "$pkg#$userId"
+        if (label.isEmpty()) {
+            labels.remove(key)
+        } else {
+            labels.put(key, label)
+        }
+        return try {
+            labelsFile().writeText(labels.toString())
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /** Total ukuran data instance (internal + eksternal). */
+    private fun instanceSize(pkg: String, userId: Int): Long {
+        var total = 0L
+        for (dir in listOf(
+            top.niunaijun.blackbox.core.env.BEnvironment.getDataDir(pkg, userId),
+            top.niunaijun.blackbox.core.env.BEnvironment.getExternalDataDir(pkg, userId)
+        )) {
+            total += dirSize(dir)
+        }
+        return total
+    }
+
+    private fun dirSize(dir: File): Long {
+        if (!dir.isDirectory) return 0L
+        var total = 0L
+        try {
+            dir.walkTopDown().forEach { f ->
+                if (f.isFile) total += f.length()
+            }
+        } catch (t: Throwable) {
+        }
+        return total
+    }
+
+    // --------------------------------------------- bersihkan / backup / restore
+
+    private fun wipeContents(dir: File) {
+        if (!dir.isDirectory) return
+        dir.listFiles()?.forEach { child ->
+            child.deleteRecursively()
+        }
+    }
+
+    /** Reset bersih satu instance: login/data terhapus, clone tetap ada. */
+    private fun parallelClearData(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        val userId = call.argument<Int>("userId") ?: 0
+        val core = top.niunaijun.blackbox.BlackBoxCore.get()
+        if (!core.isInstalled(pkg, userId)) return false
+        try {
+            core.stopPackage(pkg, userId)
+        } catch (t: Throwable) {
+        }
+        wipeContents(
+            top.niunaijun.blackbox.core.env.BEnvironment.getDataDir(pkg, userId))
+        wipeContents(
+            top.niunaijun.blackbox.core.env.BEnvironment.getExternalDataDir(pkg, userId))
+        return true
+    }
+
+    /**
+     * Backup data satu instance ke zip di folder ekspor (cache dilewati).
+     * Struktur zip: "internal/..." dan "external/...".
+     */
+    private fun parallelBackup(call: MethodCall): Any {
+        val pkg = call.argument<String>("package") ?: error("package wajib diisi")
+        val userId = call.argument<Int>("userId") ?: 0
+        val internal =
+            top.niunaijun.blackbox.core.env.BEnvironment.getDataDir(pkg, userId)
+        val external =
+            top.niunaijun.blackbox.core.env.BEnvironment.getExternalDataDir(pkg, userId)
+        try {
+            top.niunaijun.blackbox.BlackBoxCore.get().stopPackage(pkg, userId)
+        } catch (t: Throwable) {
+        }
+        val backups = File(exportDir(), "backups")
+        if (!backups.isDirectory && !backups.mkdirs()) {
+            error("Gagal membuat folder backup.")
+        }
+        val out = File(
+            backups,
+            "${ApkUtil.safeFileName(pkg, pkg)}-$userId-${System.currentTimeMillis()}.zip"
+        )
+        var written = 0
+        java.util.zip.ZipOutputStream(
+            java.io.BufferedOutputStream(FileOutputStream(out))).use { zos ->
+            for (pair in listOf("internal" to internal, "external" to external)) {
+                val base = pair.second
+                if (!base.isDirectory) continue
+                base.walkTopDown().filter { it.isFile }.forEach { f ->
+                    val rel = f.relativeTo(base).path.replace('\\', '/')
+                    if (rel == "cache" || rel.startsWith("cache/")) return@forEach
+                    zos.putNextEntry(java.util.zip.ZipEntry("${pair.first}/$rel"))
+                    f.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                    written++
+                }
+            }
+        }
+        if (written == 0) {
+            out.delete()
+            error("Tidak ada data untuk dibackup (instance kosong?).")
+        }
+        return mapOf("path" to out.absolutePath, "sizeBytes" to out.length())
+    }
+
+    /** Pulihkan data instance dari zip hasil backup. */
+    private fun parallelRestore(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        val userId = call.argument<Int>("userId") ?: 0
+        val zipPath = call.argument<String>("zipPath") ?: return false
+        val zipFile = File(zipPath)
+        if (!zipFile.isFile) return false
+        val internal =
+            top.niunaijun.blackbox.core.env.BEnvironment.getDataDir(pkg, userId)
+        val external =
+            top.niunaijun.blackbox.core.env.BEnvironment.getExternalDataDir(pkg, userId)
+        try {
+            top.niunaijun.blackbox.BlackBoxCore.get().stopPackage(pkg, userId)
+        } catch (t: Throwable) {
+        }
+        wipeContents(internal)
+        wipeContents(external)
+        java.util.zip.ZipFile(zipFile).use { zf ->
+            val entries = zf.entries()
+            while (entries.hasMoreElements()) {
+                val e = entries.nextElement()
+                if (e.isDirectory) continue
+                val slash = e.name.indexOf('/')
+                if (slash <= 0) continue
+                val root = when (e.name.substring(0, slash)) {
+                    "internal" -> internal
+                    "external" -> external
+                    else -> continue
+                }
+                val target = File(root, e.name.substring(slash + 1))
+                // Cegah zip-slip: target wajib tetap di dalam root.
+                if (!target.canonicalPath.startsWith(root.canonicalPath + File.separator)) {
+                    continue
+                }
+                target.parentFile?.mkdirs()
+                zf.getInputStream(e).use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+        return true
+    }
+
+    /** Ikon instance dengan badge nomor di pojok (disimpan permanen, bukan cache). */
+    private fun badgedIconPath(pkg: String, icon: Drawable, n: Int): String? {
+        return try {
+            val dir = File(context.filesDir, "instance-icons")
+            if (!dir.exists()) dir.mkdirs()
+            val out = File(dir, "$pkg-$n.png")
+            if (out.isFile) return out.absolutePath
+            val size = 144
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = android.graphics.Canvas(bmp)
+            icon.setBounds(0, 0, size, size)
+            icon.draw(c)
+            val r = size * 0.20f
+            val cx = size - r * 0.95f
+            val cy = size - r * 0.95f
+            val bubble = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            bubble.color = android.graphics.Color.parseColor("#0A84FF")
+            c.drawCircle(cx, cy, r, bubble)
+            val text = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            text.color = android.graphics.Color.WHITE
+            text.textSize = r * 1.15f
+            text.textAlign = android.graphics.Paint.Align.CENTER
+            text.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            c.drawText(
+                n.toString(), cx,
+                cy - (text.descent() + text.ascent()) / 2f, text
+            )
+            FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            out.absolutePath
+        } catch (t: Throwable) {
+            iconPathFor(pkg, icon)
+        }
     }
 
     /**

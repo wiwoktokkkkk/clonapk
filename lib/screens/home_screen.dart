@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 
 import '../models/app_info.dart';
@@ -159,8 +160,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: const Text('Buka'),
           ),
           CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(ctx).pop('rename'),
+            child: const Text('Ganti nama'),
+          ),
+          CupertinoActionSheetAction(
             onPressed: () => Navigator.of(ctx).pop('shortcut'),
             child: const Text('Buat ikon di layar utama'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(ctx).pop('backup'),
+            child: const Text('Backup data'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(ctx).pop('restore'),
+            child: const Text('Restore data dari zip'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(ctx).pop('clear'),
+            child: const Text('Bersihkan data (reset login)'),
           ),
           CupertinoActionSheetAction(
             isDestructiveAction: true,
@@ -178,11 +195,131 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     if (choice == 'open') {
       await _launchInst(inst);
+    } else if (choice == 'rename') {
+      await _renameInst(inst);
     } else if (choice == 'shortcut') {
       await _shortcutInst(inst);
+    } else if (choice == 'backup') {
+      await _backupInst(inst);
+    } else if (choice == 'restore') {
+      await _restoreInst(inst);
+    } else if (choice == 'clear') {
+      await _clearInst(inst);
     } else if (choice == 'remove') {
       await _removeInst(inst);
     }
+  }
+
+  // ------------------------------------------------- nama / backup / restore
+
+  Future<void> _renameInst(ParallelApp inst) async {
+    final controller = TextEditingController(text: inst.label);
+    final label = await showCupertinoDialog<String>(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('Ganti nama instance'),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: CupertinoTextField(
+            controller: controller,
+            autofocus: true,
+            placeholder: 'Contoh: WA Toko',
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Batal'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (label == null) return;
+    await _service.parallelRename(inst.packageName,
+        userId: inst.userId, label: label.trim());
+    _load();
+  }
+
+  Future<void> _backupInst(ParallelApp inst) async {
+    try {
+      final res =
+          await _service.parallelBackup(inst.packageName, userId: inst.userId);
+      final path = res['path'] as String;
+      final size = res['sizeBytes'] as int;
+      final share = await _confirmCustom(
+          'Backup selesai',
+          'Data ${inst.label} disimpan sebagai zip (${formatBytes(size)}) di '
+              'folder ClonApk/backups. Bagikan sekarang untuk disimpan ke '
+              'cloud/penyimpanan lain?',
+          'Bagikan');
+      if (share == true) {
+        await _service.shareApk(path);
+      }
+    } on CloneFailure catch (e) {
+      await _dialog('Backup gagal', e.message);
+    } catch (e) {
+      await _dialog('Backup gagal', '$e');
+    }
+  }
+
+  Future<void> _restoreInst(ParallelApp inst) async {
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['zip'],
+    );
+    final path = files.isEmpty ? null : files.single.path;
+    if (path == null || path.isEmpty) return;
+    final sure = await _confirmCustom(
+        'Restore data?',
+        'Data ${inst.label} saat ini akan DITIMPA dengan isi zip terpilih. '
+            'Instance lain tidak terpengaruh.',
+        'Restore');
+    if (sure != true) return;
+    final ok = await _service
+        .parallelRestore(inst.packageName, userId: inst.userId, zipPath: path);
+    _load();
+    await _dialog(ok ? 'Restore selesai' : 'Restore gagal',
+        ok ? '${inst.label} dipulihkan dari backup.' : 'Zip tidak bisa dibaca.');
+  }
+
+  Future<void> _clearInst(ParallelApp inst) async {
+    final sure = await _confirmCustom(
+        'Bersihkan data ${inst.label}?',
+        'Login, chat, dan semua data instance ini dihapus permanen. Clone-nya '
+            'tetap ada (seperti aplikasi baru di-install).',
+        'Bersihkan');
+    if (sure != true) return;
+    await _service
+        .parallelClearData(inst.packageName, userId: inst.userId);
+    _load();
+  }
+
+  Future<bool?> _confirmCustom(String title, String message, String okLabel) {
+    return showCupertinoDialog<bool>(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(okLabel),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Batal'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ------------------------------------------------------------------- dialog
@@ -300,7 +437,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               for (final inst in _instances)
                                 IosRow(
                                   title: inst.label,
-                                  subtitle: inst.packageName,
+                                  subtitle:
+                                      '${inst.packageName} · ${formatBytes(inst.sizeBytes)}',
                                   leading: _InstanceIcon(inst: inst),
                                   trailing: IosPillButton(
                                     label: 'Buka',
