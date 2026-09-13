@@ -704,23 +704,36 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun parallelApps(): Any {
         val core = top.niunaijun.blackbox.BlackBoxCore.get()
         val pm = context.packageManager
+        data class Inst(val pkg: String, val userId: Int)
+        val instances = ArrayList<Inst>()
+        for (u in core.getUsers()) {
+            for (pi in core.getInstalledPackages(0, u.id)) {
+                val pkg = pi.packageName ?: continue
+                instances.add(Inst(pkg, u.id))
+            }
+        }
+        // Urutkan stabil: per package lalu userId, supaya penomoran
+        // "WA 1, WA 2, ..." konsisten antar pemanggilan.
+        instances.sortWith(compareBy({ it.pkg }, { it.userId }))
+        val counter = HashMap<String, Int>()
         val out = ArrayList<Map<String, Any?>>()
-        for (pi in core.getInstalledPackages(0, 0)) {
-            val pkg = pi.packageName ?: continue
-            // Label & ikon diambil dari aplikasi asli yang terpasang; resource
-            // di dalam mesin tidak bisa dimuat PackageManager host.
+        for (inst in instances) {
+            val n = (counter[inst.pkg] ?: 0) + 1
+            counter[inst.pkg] = n
             val ai = try {
-                pm.getApplicationInfo(pkg, 0)
+                pm.getApplicationInfo(inst.pkg, 0)
             } catch (t: Throwable) {
                 null
             }
+            val baseLabel = ai?.loadLabel(pm)?.toString() ?: inst.pkg
             out.add(
                 mapOf(
-                    "packageName" to pkg,
-                    "label" to (ai?.loadLabel(pm)?.toString() ?: pkg),
-                    "versionName" to (pi.versionName ?: "-"),
+                    "packageName" to inst.pkg,
+                    "userId" to inst.userId,
+                    "label" to "$baseLabel $n",
+                    "versionName" to "-",
                     "iconPath" to
-                            if (ai != null) iconPathFor(pkg, ai.loadIcon(pm)) else null
+                            if (ai != null) iconPathFor(inst.pkg, ai.loadIcon(pm)) else null
                 )
             )
         }
@@ -728,23 +741,30 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return out
     }
 
+    /** userId bebas berikutnya untuk package ini → tiap tambahan = instance baru. */
+    private fun nextFreeUserId(core: top.niunaijun.blackbox.BlackBoxCore, pkg: String): Int {
+        for (id in 0..31) {
+            if (!core.isInstalled(pkg, id)) return id
+        }
+        error("Batas 32 instance untuk $pkg tercapai.")
+    }
+
     private fun parallelInstall(call: MethodCall): Any {
         val pkg = call.argument<String>("package") ?: error("package wajib diisi")
         val core = top.niunaijun.blackbox.BlackBoxCore.get()
-        if (core.isInstalled(pkg, 0)) {
-            return mapOf("packageName" to pkg, "already" to true)
-        }
-        val res = core.installPackageAsUser(pkg, 0)
+        val userId = nextFreeUserId(core, pkg)
+        val res = core.installPackageAsUser(pkg, userId)
         if (!res.success) {
             error(res.msg ?: "Mesin parallel menolak memasang $pkg.")
         }
-        return mapOf("packageName" to pkg, "already" to false)
+        return mapOf("packageName" to pkg, "userId" to userId)
     }
 
     private fun parallelLaunch(call: MethodCall): Boolean {
         val pkg = call.argument<String>("package") ?: return false
+        val userId = call.argument<Int>("userId") ?: 0
         return try {
-            top.niunaijun.blackbox.BlackBoxCore.get().launchApk(pkg, 0)
+            top.niunaijun.blackbox.BlackBoxCore.get().launchApk(pkg, userId)
         } catch (t: Throwable) {
             false
         }
@@ -752,8 +772,9 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun parallelUninstall(call: MethodCall): Boolean {
         val pkg = call.argument<String>("package") ?: return false
+        val userId = call.argument<Int>("userId") ?: 0
         return try {
-            top.niunaijun.blackbox.BlackBoxCore.get().uninstallPackageAsUser(pkg, 0)
+            top.niunaijun.blackbox.BlackBoxCore.get().uninstallPackageAsUser(pkg, userId)
             true
         } catch (t: Throwable) {
             false
@@ -767,10 +788,12 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     private fun parallelShortcut(call: MethodCall): Boolean {
         val pkg = call.argument<String>("package") ?: return false
+        val userId = call.argument<Int>("userId") ?: 0
         return try {
             val pm = context.packageManager
             val ai = pm.getApplicationInfo(pkg, 0)
-            val label = ai.loadLabel(pm).toString()
+            val baseLabel = ai.loadLabel(pm).toString()
+            val label = "$baseLabel ${userId + 1}"
             val iconFile = iconPathFor(pkg, ai.loadIcon(pm))
             val bmp = if (iconFile != null && java.io.File(iconFile).isFile) {
                 android.graphics.BitmapFactory.decodeFile(iconFile)
@@ -781,10 +804,11 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val launch = Intent(context, ParallelShortcutActivity::class.java)
                 .setAction(Intent.ACTION_MAIN)
                 .putExtra("package", pkg)
+                .putExtra("userId", userId)
 
             if (android.os.Build.VERSION.SDK_INT >= 26) {
                 val shortcut = androidx.core.content.pm.ShortcutInfoCompat
-                    .Builder(context, "parallel-$pkg")
+                    .Builder(context, "parallel-$pkg-$userId")
                     .setShortLabel(label)
                     .setIcon(androidx.core.graphics.drawable.IconCompat
                         .createWithBitmap(bmp))

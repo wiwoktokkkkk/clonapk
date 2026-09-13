@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/app_info.dart';
 import '../models/clone_result.dart';
+import '../models/parallel_app.dart';
 
 /// Satu-satunya titik yang berbicara dengan sisi Android.
 ///
@@ -255,49 +256,53 @@ class CloneService {
 
   // ------------------------------------------------------- mesin parallel
 
-  /// Daftar aplikasi di dalam mesin parallel (BlackBox).
-  Future<List<AppInfo>> parallelApps() async {
+  /// Daftar instance aplikasi di dalam mesin parallel (BlackBox).
+  Future<List<ParallelApp>> parallelApps() async {
     try {
       final res = await _channel.invokeMethod<List<dynamic>>('parallelApps');
       return (res ?? const <dynamic>[])
           .whereType<Map<dynamic, dynamic>>()
-          .map((m) => AppInfo.fromMap({
-                'packageName': m['packageName'],
-                'label': m['label'],
-                'versionName': m['versionName'],
-                'apkPath': '',
-                'iconPath': m['iconPath'],
-              }))
+          .map(ParallelApp.fromMap)
           .toList();
     } on PlatformException catch (e) {
       throw CloneFailure(e.message ?? 'Mesin parallel tidak tersedia.');
     }
   }
 
-  /// Masukkan aplikasi ke mesin parallel.
-  Future<void> parallelInstall(String packageName) async {
+  /// Masukkan aplikasi ke mesin parallel; selalu membuat instance baru
+  /// (WA 1, WA 2, ...) dan mengembalikan {packageName, userId}.
+  Future<Map<String, dynamic>> parallelInstall(String packageName) async {
     try {
-      await _channel
-          .invokeMethod<Map<dynamic, dynamic>>('parallelInstall', {'package': packageName});
+      final m = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+          'parallelInstall', {'package': packageName});
+      return {
+        'packageName': (m?['packageName'] ?? packageName) as String,
+        'userId': (m?['userId'] ?? 0) as int,
+      };
     } on PlatformException catch (e) {
       throw CloneFailure(e.message ?? 'Mesin parallel menolak aplikasi ini.');
     }
   }
 
-  /// Jalankan aplikasi di dalam mesin parallel.
-  Future<bool> parallelLaunch(String packageName) => _channel
-      .invokeMethod<bool>('parallelLaunch', {'package': packageName})
+  /// Jalankan satu instance di dalam mesin parallel.
+  Future<bool> parallelLaunch(String packageName, {int userId = 0}) => _channel
+      .invokeMethod<bool>(
+          'parallelLaunch', {'package': packageName, 'userId': userId})
       .then((v) => v ?? false);
 
-  /// Keluarkan aplikasi dari mesin parallel.
-  Future<bool> parallelUninstall(String packageName) => _channel
-      .invokeMethod<bool>('parallelUninstall', {'package': packageName})
-      .then((v) => v ?? false);
+  /// Hapus satu instance dari mesin parallel (data instance itu saja).
+  Future<bool> parallelUninstall(String packageName, {int userId = 0}) =>
+      _channel
+          .invokeMethod<bool>(
+              'parallelUninstall', {'package': packageName, 'userId': userId})
+          .then((v) => v ?? false);
 
-  /// Buat ikon layar utama untuk aplikasi di dalam mesin parallel.
-  Future<bool> parallelShortcut(String packageName) => _channel
-      .invokeMethod<bool>('parallelShortcut', {'package': packageName})
-      .then((v) => v ?? false);
+  /// Buat ikon layar utama untuk satu instance.
+  Future<bool> parallelShortcut(String packageName, {int userId = 0}) =>
+      _channel
+          .invokeMethod<bool>(
+              'parallelShortcut', {'package': packageName, 'userId': userId})
+          .then((v) => v ?? false);
 }
 
 /// Kegagalan yang pesannya aman ditampilkan langsung ke pengguna.

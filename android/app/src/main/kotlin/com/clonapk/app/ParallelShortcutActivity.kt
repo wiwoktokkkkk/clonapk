@@ -14,11 +14,12 @@ class ParallelShortcutActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val pkg = intent?.getStringExtra("package")
+        val userId = intent?.getIntExtra("userId", 0) ?: 0
         if (pkg != null && pkg.isNotEmpty()) {
             try {
                 val core = BlackBoxCore.get()
-                if (core.isInstalled(pkg, 0)) {
-                    core.launchApk(pkg, 0)
+                if (core.isInstalled(pkg, userId)) {
+                    core.launchApk(pkg, userId)
                 }
             } catch (_: Throwable) {
                 // Ikon hanya pelengkap; kegagalan tidak boleh menampilkan crash.

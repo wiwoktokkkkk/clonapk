@@ -3,15 +3,17 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 
 import '../models/app_info.dart';
-import '../models/clone_result.dart';
+import '../models/parallel_app.dart';
 import '../services/clone_service.dart';
 import '../widgets/ios_widgets.dart';
-import 'clone_sheet.dart';
-import 'history_screen.dart';
-import 'progress_screen.dart';
-import 'result_screen.dart';
 
-/// Layar utama: clone satu-tap dengan identitas otomatis + daftar clone kamu.
+/// Beranda ClonApk: murni mesin parallel.
+///
+/// Sesuai permintaan pengguna, Ruang Virtual dan mode APK dihilangkan —
+/// satu-satunya fitur adalah aplikasi DI DALAM mesin:
+///  - tambah aplikasi (boleh berkali-kali: "WA 1", "WA 2", ...),
+///  - cari aplikasi di daftar tambah,
+///  - buka (ketuk), buat ikon layar utama (menu), hapus instance (✕).
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -21,48 +23,28 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _service = CloneService.instance;
-  final _searchController = TextEditingController();
 
   List<AppInfo> _apps = const [];
-  List<HistoryItem> _history = const [];
-  String _query = '';
-  bool _includeSystem = false;
+  List<ParallelApp> _instances = const [];
   bool _loading = true;
   bool _busy = false;
   String? _error;
-
-  // Ruang virtual (profil kerja): clone package sama tanpa install ulang.
-  bool _profileOwner = false;
-  bool _hasProfile = false;
-  bool _useVirtual = false;
-
-  // Mesin parallel (BlackBox, eksperimental): aplikasi jalan di dalam ClonApk.
-  List<AppInfo> _parallelApps = const [];
-
-  // Sesuai permintaan: ClonApk fokus "hanya aplikasi dalam mesin".
-  // Ruang Virtual & mode APK disembunyikan di balik sakelar ini.
-  bool _showFallback = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _searchController.addListener(() {
-      setState(() => _query = _searchController.text.trim().toLowerCase());
-    });
     _load();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _searchController.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Kembali dari layar persetujuan profil kerja → segarkan status.
     if (state == AppLifecycleState.resumed) {
       _load();
     }
@@ -75,20 +57,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     try {
       final results = await Future.wait([
-        _service.getInstalledApps(includeSystem: _includeSystem),
-        _service.getHistory(),
-        _service.virtualStatus(),
-        _service.parallelApps().catchError((_) => <AppInfo>[]),
+        _service.getInstalledApps(includeSystem: false),
+        _service.parallelApps().catchError((_) => <ParallelApp>[]),
       ]);
       if (!mounted) return;
       setState(() {
         _apps = results[0] as List<AppInfo>;
-        _history = results[1] as List<HistoryItem>;
-        final vs = results[2] as Map<String, bool>;
-        _profileOwner = vs['profileOwner'] ?? false;
-        _hasProfile = vs['hasProfile'] ?? false;
-        if (_profileOwner) _useVirtual = true;
-        _parallelApps = results[3] as List<AppInfo>;
+        _instances = results[1] as List<ParallelApp>;
         _loading = false;
       });
     } on CloneFailure catch (e) {
@@ -100,120 +75,84 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Minta izin sistem untuk membuat profil kerja (satu kali saja).
-  Future<void> _provisionVirtual() async {
-    final ok = await _service.provisionProfile();
-    if (!mounted) return;
-    if (!ok) {
-      await _dialog('Tidak bisa dibuka',
-          'Layar penyiapan profil kerja gagal dibuka oleh sistem.');
-      return;
-    }
-    await _dialog('Selesaikan di layar sistem',
-        'Layar "Siapkan profil kerja" akan muncul. Setujui — itu satu-satunya '
-        'langkah manual, dan setelah itu ruang virtual aktif selamanya. '
-        'Kembali ke ClonApk lalu ketuk Clone pada aplikasi mana pun.');
-  }
+  // ------------------------------------------------------------------ tambah
 
-  /// Dialog informasi/gagal yang konsisten dengan gaya iOS.
-  Future<void> _dialog(String title, String message) async {
-    if (!mounted) return;
-    await showCupertinoDialog<void>(
-      context: context,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Oke'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Package yang sudah punya instance di ruang virtual (dari riwayat).
-  Set<String> get _virtualCloned => _history
-      .where((h) => h.isVirtual)
-      .map((h) => h.originalPackage)
-      .toSet();
-
-  /// Daftar aplikasi untuk ditambahkan ke mesin parallel.
-  Future<void> _addParallel() async {
-    final apps =
-        _apps.where((a) => a.packageName != 'com.clonapk.app').toList();
+  /// Lembar "Tambah aplikasi": daftar lengkap + pencarian.
+  Future<void> _addSheet() async {
     await showCupertinoModalPopup<void>(
       context: context,
-      builder: (ctx) => Container(
-        height: MediaQuery.of(ctx).size.height * 0.6,
-        color: CupertinoColors.systemGroupedBackground.resolveFrom(ctx),
-        child: Column(
-          children: [
-            const SizedBox(height: 14),
-            const Text('Tambah ke mesin parallel',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Expanded(
-              child: ListView(
-                children: [
-                  for (final app in apps)
-                    IosRow(
-                      title: app.label,
-                      subtitle: app.packageName,
-                      leading: AppIconTile(app: app),
-                      trailing: IosPillButton(
-                        label: 'Tambah',
-                        icon: CupertinoIcons.plus_circle,
-                        onPressed: () async {
-                          Navigator.of(ctx).pop();
-                          try {
-                            await _service.parallelInstall(app.packageName);
-                            // Langsung coba buatkan ikon di layar utama supaya
-                            // clone tampil seperti aplikasi biasa.
-                            final pinned =
-                                await _service.parallelShortcut(app.packageName);
-                            _load();
-                            await _dialog(
-                                'Berhasil ditambahkan',
-                                '${app.label} sekarang ada di dalam mesin. '
-                                'Data & loginnya tersimpan di penyimpanan '
-                                'ClonApk — hapus cache tidak akan '
-                                'menghapusnya.${pinned ? '' : ' Ikon layar utama gagal dibuat otomatis; pakai tekan lama pada ikon di grid → "Buat ikon".'}');
-                          } on CloneFailure catch (e) {
-                            await _dialog('Mesin parallel gagal', e.message);
-                          } catch (e) {
-                            await _dialog('Mesin parallel gagal', '$e');
-                          }
-                        },
-                      ),
-                      dense: true,
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => _AddAppSheet(apps: _apps, onPick: _addApp),
     );
   }
 
-  /// Buka aplikasi di dalam mesin parallel.
-  Future<void> _launchParallel(AppInfo app) async {
-    final ok = await _service.parallelLaunch(app.packageName);
-    if (!ok && mounted) {
-      await _dialog('Gagal membuka',
-          '${app.label} tidak bisa dijalankan di mesin parallel pada perangkat '
-          'ini. Coba Ruang Virtual (lebih andal) atau mode APK.');
+  /// Masukkan aplikasi ke mesin → selalu instance baru (WA 1, WA 2, ...).
+  Future<void> _addApp(AppInfo app) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final res = await _service.parallelInstall(app.packageName);
+      final userId = res['userId'] as int;
+      // Langsung minta ikon layar utama untuk instance baru ini.
+      final pinned =
+          await _service.parallelShortcut(app.packageName, userId: userId);
+      _load();
+      await _dialog(
+          'Berhasil ditambahkan',
+          '${app.label} ${userId + 1} sekarang ada di dalam mesin dengan data '
+          'terpisah. Login/sesi tersimpan di penyimpanan ClonApk — hapus '
+          'cache tidak menghapusnya. Tambahkan lagi untuk membuat '
+          '${app.label} ${userId + 2}.'
+          '${pinned ? '' : ' Ikon layar utama gagal dibuat otomatis; pakai tekan lama pada ikon → "Buat ikon".'}');
+    } on CloneFailure catch (e) {
+      await _dialog('Mesin parallel gagal', e.message);
+    } catch (e) {
+      await _dialog('Mesin parallel gagal', '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  /// Menu tekan-lama pada ubin mesin parallel.
-  Future<void> _parallelMenu(AppInfo app) async {
+  // ------------------------------------------------------------- per instance
+
+  Future<void> _launchInst(ParallelApp inst) async {
+    final ok =
+        await _service.parallelLaunch(inst.packageName, userId: inst.userId);
+    if (!ok && mounted) {
+      await _dialog('Gagal membuka',
+          '${inst.label} tidak bisa dijalankan di mesin parallel pada '
+          'perangkat ini. Mesin ini eksperimental — Android baru dan '
+          'aplikasi berproteksi ketat sering tidak didukung.');
+    }
+  }
+
+  Future<void> _removeInst(ParallelApp inst) async {
+    final sure = await _confirm(
+        'Hapus ${inst.label}?',
+        'Data instance ini (login, chat, dll.) akan dihapus permanen dari '
+        'mesin. Instance lain dan aplikasi aslinya tidak terpengaruh.');
+    if (sure != true) return;
+    await _service.parallelUninstall(inst.packageName, userId: inst.userId);
+    _load();
+  }
+
+  Future<void> _shortcutInst(ParallelApp inst) async {
+    final ok = await _service.parallelShortcut(inst.packageName,
+        userId: inst.userId);
+    await _dialog(
+        ok ? 'Ikon diminta' : 'Gagal membuat ikon',
+        ok
+            ? 'Permintaan ikon ${inst.label} dikirim ke launcher. Sebagian '
+                'launcher menampilkan dialog konfirmasi — setujui di sana.'
+            : 'Launcher HP ini tidak mendukung pin ikon otomatis. Gunakan '
+                'menu shortcut launcher secara manual.');
+  }
+
+  /// Menu tekan-lama pada ubin instance.
+  Future<void> _menuInst(ParallelApp inst) async {
     final choice = await showCupertinoModalPopup<String>(
       context: context,
       builder: (ctx) => CupertinoActionSheet(
-        title: Text(app.label),
+        title: Text(inst.label),
         actions: [
           CupertinoActionSheetAction(
             onPressed: () => Navigator.of(ctx).pop('open'),
@@ -238,473 +177,294 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
     if (!mounted) return;
     if (choice == 'open') {
-      await _launchParallel(app);
+      await _launchInst(inst);
     } else if (choice == 'shortcut') {
-      final ok = await _service.parallelShortcut(app.packageName);
-      await _dialog(
-          ok ? 'Ikon diminta' : 'Gagal membuat ikon',
-          ok
-              ? 'Permintaan ikon dikirim ke launcher. Sebagian launcher '
-                  'menampilkan dialog konfirmasi — setujui di sana.'
-              : 'Launcher HP ini tidak mendukung pin ikon otomatis. '
-                  'Gunakan menu widget/shortcut launcher secara manual.');
+      await _shortcutInst(inst);
     } else if (choice == 'remove') {
-      await _service.parallelUninstall(app.packageName);
-      _load();
+      await _removeInst(inst);
     }
   }
 
+  // ------------------------------------------------------------------- dialog
+
+  Future<void> _dialog(String title, String message) async {
+    if (!mounted) return;
+    await showCupertinoDialog<void>(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Oke'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirm(String title, String message) {
+    return showCupertinoDialog<bool>(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Hapus'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Batal'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------------- view
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      navigationBar: const CupertinoNavigationBar(
+        middle: Text('ClonApk'),
+      ),
+      child: SafeArea(
+        child: _loading
+            ? const Center(child: CupertinoActivityIndicator(radius: 14))
+            : _error != null
+                ? _ErrorView(message: _error!, onRetry: _load)
+                : CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: IosGroup(
+                          header: 'Aplikasi dalam mesin',
+                          showSeparators: _instances.isEmpty,
+                          children: [
+                            IosRow(
+                              title: 'Tambah aplikasi',
+                              subtitle: 'Bisa berkali-kali — WA 1, WA 2, dst.',
+                              leading:
+                                  const _LeadingIcon(CupertinoIcons.plus_circle),
+                              trailing: IosPillButton(
+                                label: 'Tambah',
+                                icon: CupertinoIcons.search,
+                                onPressed: _busy ? null : _addSheet,
+                              ),
+                              onTap: _busy ? null : _addSheet,
+                            ),
+                            if (_instances.isEmpty)
+                              const IosRow(
+                                title: 'Mesin masih kosong',
+                                subtitle:
+                                    'Tambahkan aplikasi pertama — jalannya di '
+                                    'dalam ClonApk, tanpa install',
+                              )
+                            else
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 6, 12, 16),
+                                child: Wrap(
+                                  spacing: 14,
+                                  runSpacing: 16,
+                                  children: [
+                                    for (final inst in _instances)
+                                      _InstanceTile(
+                                        inst: inst,
+                                        onTap: () => _launchInst(inst),
+                                        onLongPress: () => _menuInst(inst),
+                                        onRemove: () => _removeInst(inst),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                          footer: 'Ketuk ikon = buka di dalam mesin. '
+                              'Tekan lama = menu (ikon layar utama / hapus). '
+                              '✕ = hapus instance itu saja (kalau salah '
+                              'tambah). Data tiap instance terpisah dan '
+                              'tersimpan di ClonApk — hapus cache tidak '
+                              'menghapusnya. Mesin parallel bersifat '
+                              'eksperimental: Android baru & aplikasi proteksi '
+                              'ketat bisa menolak berjalan.',
+                        ),
+                      ),
+                      const SliverToBoxAdapter(child: SizedBox(height: 32)),
+                    ],
+                  ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------------ lembar tambah
+
+class _AddAppSheet extends StatefulWidget {
+  const _AddAppSheet({required this.apps, required this.onPick});
+
+  final List<AppInfo> apps;
+  final Future<void> Function(AppInfo) onPick;
+
+  @override
+  State<_AddAppSheet> createState() => _AddAppSheetState();
+}
+
+class _AddAppSheetState extends State<_AddAppSheet> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() => _query = _searchController.text.trim().toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   List<AppInfo> get _filtered {
-    if (_query.isEmpty) return _apps;
-    return _apps
+    final all =
+        widget.apps.where((a) => a.packageName != 'com.clonapk.app').toList();
+    if (_query.isEmpty) return all;
+    return all
         .where((a) =>
             a.label.toLowerCase().contains(_query) ||
             a.packageName.toLowerCase().contains(_query))
         .toList();
   }
 
-  /// Tombol Clone: utamakan ruang virtual (tanpa menyalin APK — hanya data
-  /// yang dipisah). Kalau belum aktif, tawarkan mengaktifkan atau mode APK.
-  Future<void> _cloneSmart(AppInfo app) async {
-    if (_busy) return;
-    if (_useVirtual && _profileOwner) {
-      await _virtualClone(app);
-      return;
-    }
-    if (!_profileOwner) {
-      final choice = await showCupertinoModalPopup<String>(
-        context: context,
-        builder: (ctx) => CupertinoActionSheet(
-          title: Text('Clone ${app.label}'),
-          message: const Text('Ruang virtual tidak menyalin APK — hanya datanya '
-              'yang dipisah, seperti HP kedua di dalam HP. Mode APK menyalin '
-              'aplikasi dengan package baru.'),
-          actions: [
-            CupertinoActionSheetAction(
-              onPressed: () => Navigator.of(ctx).pop('virtual'),
-              child: const Text('Aktifkan ruang virtual (disarankan)'),
-            ),
-            CupertinoActionSheetAction(
-              onPressed: () => Navigator.of(ctx).pop('apk'),
-              child: const Text('Clone sebagai APK (cadangan)'),
-            ),
-          ],
-          cancelButton: CupertinoActionSheetAction(
-            isDefaultAction: true,
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Batal'),
-          ),
-        ),
-      );
-      if (!mounted) return;
-      if (choice == 'virtual') {
-        await _provisionVirtual();
-      } else if (choice == 'apk') {
-        await _apkClone(app);
-      }
-      return;
-    }
-    await _apkClone(app);
-  }
-
-  /// Clone virtual: sudah ada → langsung buka; belum → buat lalu buka.
-  Future<void> _virtualClone(AppInfo app) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final has = await _service.virtualHas(app.packageName);
-      if (!has) {
-        await _service.cloneVirtual(app.packageName);
-      }
-      final opened = await _service.launchVirtual(app.packageName);
-      if (!mounted) return;
-      if (!opened) {
-        await _dialog('Sudah ada di ruang virtual',
-            '${app.label} ada di ruang virtual tapi belum bisa dibuka otomatis. '
-            'Cari ikonnya di bagian "Kerja" pada layar utama, atau buka dari '
-            'seksi "Clone kamu".');
-      }
-      _load();
-    } on CloneFailure catch (e) {
-      if (!mounted) return;
-      await _dialog('Ruang virtual gagal', e.message);
-    } catch (e) {
-      // Jangan biarkan satu kegagalan OEM membuat aplikasi tumbang.
-      if (!mounted) return;
-      await _dialog('Ruang virtual gagal', '$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  /// Mode cadangan: salin APK dengan package otomatis + installer sistem.
-  Future<void> _apkClone(AppInfo app) async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final pkg = await _service.nextClonePackage(app.packageName);
-      if (!mounted) return;
-      final result = await Navigator.of(context).push<CloneResult>(
-        CupertinoPageRoute<CloneResult>(
-          fullscreenDialog: true,
-          builder: (_) => ProgressScreen(
-            sourcePath: app.apkPath,
-            newPackage: pkg,
-            newLabel: app.label,
-            splits: app.splitPaths,
-          ),
-        ),
-      );
-      if (result != null && mounted) {
-        // Satu ketukan di installer sistem adalah satu-satunya langkah manual;
-        // Android memang mewajibkan konfirmasi pemasangan.
-        await _service.installApk(result.path, extraPaths: result.extraPaths);
-        if (!mounted) return;
-        await Navigator.of(context).push(
-          CupertinoPageRoute<void>(
-            builder: (_) => ResultScreen(result: result),
-          ),
-        );
-      }
-      _load();
-    } on CloneFailure catch (e) {
-      if (mounted) {
-        showCupertinoDialog<void>(
-          context: context,
-          builder: (ctx) => CupertinoAlertDialog(
-            title: const Text('Clone gagal'),
-            content: Text(e.message),
-            actions: [
-              CupertinoDialogAction(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Oke'),
-              ),
-            ],
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _manualClone(AppInfo app) async {
-    await showCloneSheet(context,
-        sourcePath: app.apkPath,
-        initialLabel: app.label,
-        splits: app.splitPaths);
-    _load();
-  }
-
-  Future<void> _cloneFromFile() async {
-    final path = await _service.pickApkFile();
-    if (path == null || !mounted) return;
-    await showCloneSheet(context, sourcePath: path);
-    _load();
-  }
-
-  AppInfo? _originalOf(HistoryItem item) {
-    for (final a in _apps) {
-      if (a.packageName == item.originalPackage) return a;
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final apps = _filtered;
-    return CupertinoPageScaffold(
-      child: CustomScrollView(
-        slivers: [
-          CupertinoSliverNavigationBar(
-            largeTitle: const Text('ClonApk'),
-            automaticallyImplyLeading: false,
-            trailing: GestureDetector(
-              onTap: () => Navigator.of(context).push(
-                CupertinoPageRoute(builder: (_) => const HistoryScreen()),
-              ),
-              child: const Padding(
-                padding: EdgeInsets.only(right: 4),
-                child: Icon(CupertinoIcons.time_solid, size: 22),
-              ),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.72,
+      color: CupertinoColors.systemGroupedBackground.resolveFrom(context),
+      child: Column(
+        children: [
+          const SizedBox(height: 14),
+          const Text('Tambah aplikasi ke mesin',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            child: CupertinoSearchTextField(
+              controller: _searchController,
+              placeholder: 'Cari nama atau package',
             ),
           ),
-          if (_showFallback)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-                child: CupertinoSearchTextField(
-                  controller: _searchController,
-                  placeholder: 'Cari nama atau package',
-                ),
-              ),
-            ),
-          if (_loading)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: CupertinoActivityIndicator(radius: 14)),
-            )
-          else if (_error != null)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _ErrorView(message: _error!, onRetry: _load),
-            )
-          else ...[
-            SliverToBoxAdapter(
-              child: IosGroup(
-                header: 'Mesin parallel (eksperimental)',
-                showSeparators: false,
-                children: [
-                  IosRow(
-                    title: 'Aplikasi di dalam mesin',
-                    subtitle: _parallelApps.isEmpty
-                        ? 'Berjalan di dalam ClonApk, tanpa install'
-                        : '${_parallelApps.length} aplikasi · ketuk untuk buka',
-                    leading: const _LeadingIcon(CupertinoIcons.cube_box),
-                    trailing: IosPillButton(
-                      label: 'Tambah',
-                      icon: CupertinoIcons.plus_circle,
-                      onPressed: _addParallel,
-                    ),
-                  ),
-                  if (_parallelApps.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
-                      child: Wrap(
-                        spacing: 12,
-                        runSpacing: 14,
-                        children: [
-                          for (final app in _parallelApps)
-                            SizedBox(
-                              width: 68,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () => _launchParallel(app),
-                                onLongPress: () => _parallelMenu(app),
-                                child: Column(
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(13),
-                                      child: app.iconPath != null &&
-                                              File(app.iconPath!).existsSync()
-                                          ? Image.file(File(app.iconPath!),
-                                              width: 52, height: 52)
-                                          : Container(
-                                              width: 52,
-                                              height: 52,
-                                              color: const Color(0xFFE5E5EA),
-                                              child: const Icon(
-                                                  CupertinoIcons.cube_box,
-                                                  color: Color(0xFF8E8E93)),
-                                            ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      app.label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(fontSize: 11),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                ],
-                footer: 'Mesin parallel = aplikasi dijalankan DI DALAM '
-                    'ClonApk tanpa install, seperti Parallel Space (memakai '
-                    'mesin open-source BlackBox, Apache-2.0). EKSPERIMENTAL: '
-                    'belum teruji perangkat; Android baru & aplikasi proteksi '
-                    'ketat sering tidak didukung — jika gagal, pakai Ruang '
-                    'Virtual atau mode APK. Tekan lama ubin untuk menghapus.',
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: IosGroup(
-                header: 'Mode cadangan',
-                showSeparators: false,
-                children: [
-                  IosRow(
-                    title: 'Ruang Virtual & mode APK',
-                    subtitle: _showFallback
-                        ? 'Ditampilkan di bawah'
-                        : 'Disembunyikan — ClonApk fokus mesin parallel',
-                    trailing: CupertinoSwitch(
-                      value: _showFallback,
-                      onChanged: (v) => setState(() => _showFallback = v),
-                    ),
-                    dense: true,
-                  ),
-                ],
-              ),
-            ),
-            if (_showFallback) ...[
-            SliverToBoxAdapter(
-              child: IosGroup(
-                header: 'Ruang virtual',
-                children: [
-                  IosRow(
-                    title: 'Status ruang virtual',
-                    subtitle: _profileOwner
-                        ? 'Aktif — clone tidak menyalin APK, hanya data dipisah'
-                        : _hasProfile
-                            ? 'HP sudah punya profil kerja lain — hapus dulu '
-                                'atau pakai mode APK'
-                            : 'Belum aktif — ketuk "Aktifkan" (sekali saja)',
-                    leading: const _LeadingIcon(CupertinoIcons.time_solid),
-                    trailing: !_profileOwner
-                        ? IosPillButton(
-                            label: 'Aktifkan',
-                            icon: CupertinoIcons.sparkles,
-                            onPressed: _provisionVirtual,
-                          )
-                        : const Icon(CupertinoIcons.checkmark_alt_circle,
-                            size: 22, color: Color(0xFF34C759)),
-                  ),
-                  if (_profileOwner)
-                    IosRow(
-                      title: 'Clone lewat ruang virtual',
-                      subtitle: 'Tanpa salin APK — langsung buka',
-                      trailing: CupertinoSwitch(
-                        value: _useVirtual,
-                        onChanged: (v) => setState(() => _useVirtual = v),
-                      ),
-                    ),
-                ],
-                footer: 'Clone di ruang virtual tidak mengunduh atau menyalin '
-                    'APK — aplikasi yang sudah terpasang dipakai ulang dan '
-                    'hanya datanya yang dipisah (hemat penyimpanan, seperti '
-                    'HP kedua di dalam HP). Perlu sekali persetujuan sistem '
-                    '"profil kerja". Android membatasi satu profil kerja per '
-                    'perangkat; sebagian aplikasi proteksi ketat bisa menolak '
-                    'berjalan di dalamnya — untuk itu pakai mode APK.',
-              ),
-            ),
-            if (_history.isNotEmpty)
-              SliverToBoxAdapter(
-                child: IosGroup(
-                  header: 'Clone kamu',
-                  children: [
-                    for (final item in _history)
-                      IosRow(
-                        title: item.label.isNotEmpty ? item.label : item.fileName,
-                        subtitle: item.isVirtual
-                            ? '${item.originalPackage} · ruang virtual'
-                            : item.installed
-                                ? '${item.newPackage} · terpasang'
-                                : '${item.newPackage} · belum dipasang',
-                        leading: _originalOf(item) != null
-                            ? AppIconTile(app: _originalOf(item)!)
-                            : const Icon(CupertinoIcons.doc_on_doc,
-                                size: 26, color: Color(0xFF0A84FF)),
-                        trailing: (item.installed || item.isVirtual)
-                            ? IosPillButton(
-                                label: 'Buka',
-                                icon: CupertinoIcons.play_circle,
-                                onPressed: () async {
-                                  final ok = await _service.openClone(item);
-                                  if (!ok && mounted) {
-                                    await _dialog(
-                                        'Gagal membuka',
-                                        item.isVirtual
-                                            ? 'Instance ruang virtual tidak '
-                                                'ditemukan. Coba buat ulang.'
-                                            : 'Clone belum terpasang.');
-                                  }
-                                },
-                              )
-                            : IosPillButton(
-                                label: 'Pasang',
-                                icon: CupertinoIcons.arrow_down_circle,
-                                onPressed: () async {
-                                  await _service.installApk(item.path,
-                                      extraPaths: item.extraPaths);
-                                  _load();
-                                },
-                              ),
+          Expanded(
+            child: apps.isEmpty
+                ? const Center(
+                    child: Text('Tidak ada aplikasi yang cocok',
+                        style: TextStyle(color: CupertinoColors.systemGrey)),
+                  )
+                : ListView.builder(
+                    itemCount: apps.length,
+                    itemBuilder: (_, i) {
+                      final app = apps[i];
+                      return IosRow(
+                        title: app.label,
+                        subtitle:
+                            '${app.packageName} · ${app.versionName}',
+                        leading: AppIconTile(app: app),
+                        trailing: IosPillButton(
+                          label: 'Tambah',
+                          icon: CupertinoIcons.plus_circle,
+                          onPressed: () async {
+                            Navigator.of(context).pop();
+                            await widget.onPick(app);
+                          },
+                        ),
                         dense: true,
-                      ),
-                  ],
-                  footer: 'Clone memakai nama & ikon yang sama dengan aplikasi '
-                      'aslinya dan berjalan sebagai aplikasi terpisah.',
-                ),
-              ),
-            SliverToBoxAdapter(
-              child: IosGroup(
-                header: 'Sumber clone',
-                children: [
-                  IosRow(
-                    title: 'Pilih berkas APK',
-                    subtitle: 'Ambil APK dari penyimpanan perangkat',
-                    leading: const _LeadingIcon(CupertinoIcons.folder_solid),
-                    trailing: const Icon(CupertinoIcons.chevron_right,
-                        size: 15, color: CupertinoColors.systemGrey3),
-                    onTap: _cloneFromFile,
+                      );
+                    },
                   ),
-                  IosRow(
-                    title: 'Tampilkan aplikasi sistem',
-                    leading: const _LeadingIcon(CupertinoIcons.gear_solid),
-                    trailing: CupertinoSwitch(
-                      value: _includeSystem,
-                      onChanged: (v) {
-                        setState(() => _includeSystem = v);
-                        _load();
-                      },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- ubin instance
+
+class _InstanceTile extends StatelessWidget {
+  const _InstanceTile({
+    required this.inst,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onRemove,
+  });
+
+  final ParallelApp inst;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 74,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Column(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: inst.iconPath != null &&
+                          File(inst.iconPath!).existsSync()
+                      ? Image.file(File(inst.iconPath!), width: 56, height: 56)
+                      : Container(
+                          width: 56,
+                          height: 56,
+                          color: const Color(0xFFE5E5EA),
+                          child: const Icon(CupertinoIcons.cube_box,
+                              color: Color(0xFF8E8E93)),
+                        ),
+                ),
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: GestureDetector(
+                    onTap: onRemove,
+                    child: Container(
+                      width: 20,
+                      height: 20,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFFF3B30),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(CupertinoIcons.xmark,
+                          size: 11, color: CupertinoColors.white),
                     ),
                   ),
-                ],
-                footer: 'Ketuk "Clone" untuk clone satu-tap: identitas dibuat '
-                    'otomatis dan installer langsung terbuka. Ketuk baris '
-                    'aplikasi untuk pengaturan lanjutan.',
-              ),
+                ),
+              ],
             ),
-            SliverToBoxAdapter(
-              child: IosGroup(
-                header: _query.isEmpty
-                    ? 'Aplikasi terpasang (${apps.length})'
-                    : 'Hasil pencarian (${apps.length})',
-                showSeparators: apps.isNotEmpty,
-                children: apps.isEmpty
-                    ? [
-                        const IosRow(
-                          title: 'Tidak ada aplikasi yang cocok',
-                          subtitle: 'Coba kata kunci lain',
-                        )
-                      ]
-                    : [
-                        for (final app in apps)
-                          IosRow(
-                            title: app.label,
-                            subtitle:
-                                '${app.packageName} · ${app.versionName} · ${formatBytes(app.sizeBytes)}',
-                            leading: AppIconTile(app: app),
-                            trailing: IosPillButton(
-                              label: _virtualCloned.contains(app.packageName)
-                                  ? 'Buka'
-                                  : 'Clone',
-                              icon: _virtualCloned.contains(app.packageName)
-                                  ? CupertinoIcons.play_circle
-                                  : CupertinoIcons.doc_on_doc,
-                              onPressed:
-                                  app.apkPath.isEmpty || _busy
-                                      ? null
-                                      : () => _cloneSmart(app),
-                            ),
-                            onTap: app.apkPath.isEmpty
-                                ? null
-                                : () => _manualClone(app),
-                            dense: true,
-                          ),
-                      ],
-              ),
+            const SizedBox(height: 6),
+            Text(
+              inst.label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11),
             ),
-            ],
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -739,20 +499,20 @@ class _ErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(CupertinoIcons.exclamationmark_triangle,
-                size: 42, color: CupertinoColors.systemGrey2),
+                size: 40, color: Color(0xFFFF9500)),
             const SizedBox(height: 12),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 15, height: 1.35),
-            ),
+            Text(message, textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            IosPillButton(label: 'Coba lagi', onPressed: onRetry),
+            IosPillButton(
+              label: 'Coba lagi',
+              icon: CupertinoIcons.refresh,
+              onPressed: onRetry,
+            ),
           ],
         ),
       ),

@@ -36,17 +36,22 @@ seperti aplikasi iOS di atas Android.
 
 ## 🧪 Mesin Parallel (baru di v1.5, fokus utama sejak v1.6)
 
-Mode paling mirip **Parallel Space** dan menjadi wajah utama ClonApk:
+Mode paling mirip **Parallel Space** dan sejak v1.7 merupakan
+**satu-satunya fitur** ClonApk (Ruang Virtual & mode APK dihapus dari UI):
 aplikasi dijalankan **DI DALAM ClonApk tanpa install sama sekali**.
 
-- Beranda kini **hanya menampilkan mesin parallel** (Ruang Virtual & mode
-  APK disembunyikan di balik sakelar "Mode cadangan").
-- **Tambah** aplikasi → ikonnya muncul di grid → ketuk untuk membuka.
-- **Ikon layar utama:** setiap aplikasi yang ditambahkan otomatis diminta
-  dibuatkan shortcut dengan nama & ikon aslinya, sehingga tampil seperti
-  aplikasi biasa (tekan lama ikon di grid → "Buat ikon di layar utama"
-  untuk mengulang; sebagian launcher menampilkan dialog konfirmasi).
-- Tekan lama ikon di grid → Buka / Buat ikon / Hapus dari mesin.
+- **Tambah aplikasi** → lembar daftar lengkap **dengan pencarian** →
+  ketuk "Tambah". Aplikasi yang sama boleh ditambahkan berkali-kali:
+  instance diberi nomor **WA 1, WA 2, WA 3, ...** — masing-masing dengan
+  data & login terpisah.
+- **Ketuk ikon** di grid = buka instance itu di dalam mesin.
+- **✕ pada ikon** = hapus instance itu saja (kalau salah tambah), dengan
+  konfirmasi; instance lain & aplikasi asli tidak terpengaruh.
+- **Tekan lama ikon** = menu Buka / Buat ikon di layar utama / Hapus.
+- **Ikon layar utama:** setiap instance otomatis diminta dibuatkan
+  shortcut dengan nama & ikon aslinya (mis. "WhatsApp 2"), sehingga
+  tampil seperti aplikasi biasa; sebagian launcher menampilkan dialog
+  konfirmasi.
 
 **Sesi & data clone tidak hilang karena hapus cache.** Data aplikasi di
 dalam mesin (login, nomor, chat) disimpan di penyimpanan privat ClonApk
