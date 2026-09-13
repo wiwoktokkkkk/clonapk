@@ -34,14 +34,27 @@ seperti aplikasi iOS di atas Android.
 - Hasil bisa dipasang, dibagikan, atau dihapus; riwayat clone tersimpan.
 - Mode gelap/terang mengikuti sistem.
 
-## 🧪 Mesin Parallel (baru di v1.5, eksperimental)
+## 🧪 Mesin Parallel (baru di v1.5, fokus utama sejak v1.6)
 
-Mode paling mirip **Parallel Space**: aplikasi dijalankan **DI DALAM
-ClonApk tanpa install sama sekali**.
+Mode paling mirip **Parallel Space** dan menjadi wajah utama ClonApk:
+aplikasi dijalankan **DI DALAM ClonApk tanpa install sama sekali**.
 
-- Kelompok "Mesin parallel" di beranda → **Tambah** → pilih aplikasi →
-  ikonnya muncul di grid → ketuk untuk membuka.
-- Tekan lama ikon untuk menghapus dari mesin.
+- Beranda kini **hanya menampilkan mesin parallel** (Ruang Virtual & mode
+  APK disembunyikan di balik sakelar "Mode cadangan").
+- **Tambah** aplikasi → ikonnya muncul di grid → ketuk untuk membuka.
+- **Ikon layar utama:** setiap aplikasi yang ditambahkan otomatis diminta
+  dibuatkan shortcut dengan nama & ikon aslinya, sehingga tampil seperti
+  aplikasi biasa (tekan lama ikon di grid → "Buat ikon di layar utama"
+  untuk mengulang; sebagian launcher menampilkan dialog konfirmasi).
+- Tekan lama ikon di grid → Buka / Buat ikon / Hapus dari mesin.
+
+**Sesi & data clone tidak hilang karena hapus cache.** Data aplikasi di
+dalam mesin (login, nomor, chat) disimpan di penyimpanan privat ClonApk
+(`Android/data/com.clonapk.app/files/blackbox/...`, area *files* — bukan
+*cache*). Membersihkan cache ClonApk atau restart HP tidak menghapusnya.
+Yang menghapus: menghapus ClonApk, menghapus *data* ClonApk (bukan cache),
+atau "Hapus dari mesin".
+
 - Mesinnya adalah [BlackBox](https://github.com/ALEX5402/NewBlackbox)
   (virtual engine open-source, **Apache-2.0** — salinan lisensi di
   `android/LICENSE-BLACKBOX`), di-vendor apa adanya sebagai modul
@@ -51,8 +64,8 @@ ClonApk tanpa install sama sekali**.
 Android yang terus dikunci Google. Statusnya **eksperimental**: belum teruji
 di perangkat nyata dari lingkungan build ini, sering tidak didukung di
 Android 15/16, dan aplikasi berproteksi ketat (perbankan, sebagian fitur
-WhatsApp) bisa menolak berjalan. Kalau gagal, pakai **Ruang Virtual**
-(resmi Android) atau **mode APK**.
+WhatsApp) bisa menolak berjalan. Kalau gagal, nyalakan "Mode cadangan"
+untuk memakai **Ruang Virtual** (resmi Android) atau **mode APK**.
 
 ## 🕶️ Ruang Virtual (utama sejak v1.4)
 

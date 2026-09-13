@@ -293,6 +293,11 @@ class CloneService {
   Future<bool> parallelUninstall(String packageName) => _channel
       .invokeMethod<bool>('parallelUninstall', {'package': packageName})
       .then((v) => v ?? false);
+
+  /// Buat ikon layar utama untuk aplikasi di dalam mesin parallel.
+  Future<bool> parallelShortcut(String packageName) => _channel
+      .invokeMethod<bool>('parallelShortcut', {'package': packageName})
+      .then((v) => v ?? false);
 }
 
 /// Kegagalan yang pesannya aman ditampilkan langsung ke pengguna.

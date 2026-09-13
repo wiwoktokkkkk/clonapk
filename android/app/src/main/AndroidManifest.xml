@@ -41,6 +41,15 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Trampolin ikon layar utama untuk aplikasi di dalam mesin parallel:
+             launcher bisa membukanya, ia menjalankan app guest lalu menutup. -->
+        <activity
+            android:name=".ParallelShortcutActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <!-- Menerima hasil sesi PackageInstaller (pemasangan multi-berkas
              base+split) dan membuka layar konfirmasi pemasangan sistem. -->
         <receiver

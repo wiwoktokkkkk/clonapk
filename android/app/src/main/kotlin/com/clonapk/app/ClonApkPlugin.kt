@@ -86,6 +86,7 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "parallelInstall" -> onWorker(result) { parallelInstall(call) }
             "parallelLaunch" -> result.success(parallelLaunch(call))
             "parallelUninstall" -> result.success(parallelUninstall(call))
+            "parallelShortcut" -> result.success(parallelShortcut(call))
             "shareApk" -> result.success(shareApk(call))
             "deleteApk" -> result.success(deleteApk(call))
             "revealApk" -> result.success(revealApk(call))
@@ -753,6 +754,55 @@ class ClonApkPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val pkg = call.argument<String>("package") ?: return false
         return try {
             top.niunaijun.blackbox.BlackBoxCore.get().uninstallPackageAsUser(pkg, 0)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Buat ikon layar utama (shortcut) untuk aplikasi di dalam mesin, dengan
+     * nama & ikon aplikasi aslinya — seperti Parallel Space. Di API 26+
+     * memakai pin-shortcut resmi; di bawah itu broadcast launcher lawas.
+     */
+    private fun parallelShortcut(call: MethodCall): Boolean {
+        val pkg = call.argument<String>("package") ?: return false
+        return try {
+            val pm = context.packageManager
+            val ai = pm.getApplicationInfo(pkg, 0)
+            val label = ai.loadLabel(pm).toString()
+            val iconFile = iconPathFor(pkg, ai.loadIcon(pm))
+            val bmp = if (iconFile != null && java.io.File(iconFile).isFile) {
+                android.graphics.BitmapFactory.decodeFile(iconFile)
+            } else {
+                null
+            } ?: drawableToBitmap(ai.loadIcon(pm))
+
+            val launch = Intent(context, ParallelShortcutActivity::class.java)
+                .setAction(Intent.ACTION_MAIN)
+                .putExtra("package", pkg)
+
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                val shortcut = androidx.core.content.pm.ShortcutInfoCompat
+                    .Builder(context, "parallel-$pkg")
+                    .setShortLabel(label)
+                    .setIcon(androidx.core.graphics.drawable.IconCompat
+                        .createWithBitmap(bmp))
+                    .setIntent(launch)
+                    .build()
+                if (!androidx.core.content.pm.ShortcutManagerCompat
+                        .isRequestPinShortcutSupported(context)) {
+                    return false
+                }
+                androidx.core.content.pm.ShortcutManagerCompat
+                    .requestPinShortcut(context, shortcut, null)
+            } else {
+                val add = Intent("com.android.launcher.action.INSTALL_SHORTCUT")
+                    .putExtra(Intent.EXTRA_SHORTCUT_NAME, label)
+                    .putExtra(Intent.EXTRA_SHORTCUT_INTENT, launch)
+                    .putExtra(Intent.EXTRA_SHORTCUT_ICON, bmp)
+                context.sendBroadcast(add)
+            }
             true
         } catch (t: Throwable) {
             false

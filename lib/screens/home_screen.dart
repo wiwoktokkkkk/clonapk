@@ -39,6 +39,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Mesin parallel (BlackBox, eksperimental): aplikasi jalan di dalam ClonApk.
   List<AppInfo> _parallelApps = const [];
 
+  // Sesuai permintaan: ClonApk fokus "hanya aplikasi dalam mesin".
+  // Ruang Virtual & mode APK disembunyikan di balik sakelar ini.
+  bool _showFallback = false;
+
   @override
   void initState() {
     super.initState();
@@ -165,7 +169,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           Navigator.of(ctx).pop();
                           try {
                             await _service.parallelInstall(app.packageName);
+                            // Langsung coba buatkan ikon di layar utama supaya
+                            // clone tampil seperti aplikasi biasa.
+                            final pinned =
+                                await _service.parallelShortcut(app.packageName);
                             _load();
+                            await _dialog(
+                                'Berhasil ditambahkan',
+                                '${app.label} sekarang ada di dalam mesin. '
+                                'Data & loginnya tersimpan di penyimpanan '
+                                'ClonApk — hapus cache tidak akan '
+                                'menghapusnya.${pinned ? '' : ' Ikon layar utama gagal dibuat otomatis; pakai tekan lama pada ikon di grid → "Buat ikon".'}');
                           } on CloneFailure catch (e) {
                             await _dialog('Mesin parallel gagal', e.message);
                           } catch (e) {
@@ -206,6 +220,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: const Text('Buka'),
           ),
           CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(ctx).pop('shortcut'),
+            child: const Text('Buat ikon di layar utama'),
+          ),
+          CupertinoActionSheetAction(
             isDestructiveAction: true,
             onPressed: () => Navigator.of(ctx).pop('remove'),
             child: const Text('Hapus dari mesin'),
@@ -221,6 +239,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     if (choice == 'open') {
       await _launchParallel(app);
+    } else if (choice == 'shortcut') {
+      final ok = await _service.parallelShortcut(app.packageName);
+      await _dialog(
+          ok ? 'Ikon diminta' : 'Gagal membuat ikon',
+          ok
+              ? 'Permintaan ikon dikirim ke launcher. Sebagian launcher '
+                  'menampilkan dialog konfirmasi — setujui di sana.'
+              : 'Launcher HP ini tidak mendukung pin ikon otomatis. '
+                  'Gunakan menu widget/shortcut launcher secara manual.');
     } else if (choice == 'remove') {
       await _service.parallelUninstall(app.packageName);
       _load();
@@ -402,15 +429,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-              child: CupertinoSearchTextField(
-                controller: _searchController,
-                placeholder: 'Cari nama atau package',
+          if (_showFallback)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                child: CupertinoSearchTextField(
+                  controller: _searchController,
+                  placeholder: 'Cari nama atau package',
+                ),
               ),
             ),
-          ),
           if (_loading)
             const SliverFillRemaining(
               hasScrollBody: false,
@@ -494,6 +522,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     'Virtual atau mode APK. Tekan lama ubin untuk menghapus.',
               ),
             ),
+            SliverToBoxAdapter(
+              child: IosGroup(
+                header: 'Mode cadangan',
+                showSeparators: false,
+                children: [
+                  IosRow(
+                    title: 'Ruang Virtual & mode APK',
+                    subtitle: _showFallback
+                        ? 'Ditampilkan di bawah'
+                        : 'Disembunyikan — ClonApk fokus mesin parallel',
+                    trailing: CupertinoSwitch(
+                      value: _showFallback,
+                      onChanged: (v) => setState(() => _showFallback = v),
+                    ),
+                    dense: true,
+                  ),
+                ],
+              ),
+            ),
+            if (_showFallback) ...[
             SliverToBoxAdapter(
               child: IosGroup(
                 header: 'Ruang virtual',
@@ -653,6 +701,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ],
               ),
             ),
+            ],
             const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
         ],
